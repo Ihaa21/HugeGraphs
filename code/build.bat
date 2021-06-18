@@ -21,12 +21,8 @@ pushd %OutputDir%
 del *.pdb > NUL 2> NUL
 
 REM USING GLSL IN VK USING GLSLANGVALIDATOR
-call glslangValidator -DVERTEX_SHADER=1 -S vert -e main -g -V -o %DataDir%\shader_forward_vert.spv %CodeDir%\forward_shader.cpp
-call glslangValidator -DFRAGMENT_SHADER=1 -S frag -e main -g -V -o %DataDir%\shader_forward_frag.spv %CodeDir%\forward_shader.cpp
-
-call glslangValidator -DPOINT_VERTEX_SHADER=1 -S vert -e main -g -V -o %DataDir%\shader_debug_point_vert.spv %CodeDir%\debug_shaders.cpp
-call glslangValidator -DVERTEX_SHADER=1 -S vert -e main -g -V -o %DataDir%\shader_debug_vert.spv %CodeDir%\debug_shaders.cpp
-call glslangValidator -DFRAGMENT_SHADER=1 -S frag -e main -g -V -o %DataDir%\shader_debug_frag.spv %CodeDir%\debug_shaders.cpp
+call glslangValidator -DVERTEX_SHADER=1 -S vert -e main -g -V -o %DataDir%\shader_vert.spv %CodeDir%\draw_shaders.cpp
+call glslangValidator -DCIRCLE_FRAGMENT_SHADER=1 -S frag -e main -g -V -o %DataDir%\shader_circle_frag.spv %CodeDir%\draw_shaders.cpp
 
 REM USING HLSL IN VK USING DXC
 REM set DxcDir=C:\Tools\DirectXShaderCompiler\build\Debug\bin
@@ -34,8 +30,8 @@ REM %DxcDir%\dxc.exe -spirv -T cs_6_0 -E main -fspv-target-env=vulkan1.1 -Fo ..\
 
 REM 64-bit build
 echo WAITING FOR PDB > lock.tmp
-cl %CommonCompilerFlags% %CodeDir%\clearpath_demo.cpp -Fmclearpath_demo.map -LD /link %CommonLinkerFlags% -incremental:no -opt:ref -PDB:clearpath_demo_%random%.pdb -EXPORT:Init -EXPORT:Destroy -EXPORT:SwapChainChange -EXPORT:CodeReload -EXPORT:MainLoop
+cl %CommonCompilerFlags% %CodeDir%\huge_graphs_demo.cpp -Fmhuge_graphs_demo.map -LD /link %CommonLinkerFlags% -incremental:no -opt:ref -PDB:huge_graphs_demo_%random%.pdb -EXPORT:Init -EXPORT:Destroy -EXPORT:SwapChainChange -EXPORT:CodeReload -EXPORT:MainLoop
 del lock.tmp
-call cl %CommonCompilerFlags% -DDLL_NAME=clearpath_demo -Feclearpath_demo.exe %LibsDir%\framework_vulkan\win32_main.cpp -Fmclearpath_demo.map /link %CommonLinkerFlags%
+call cl %CommonCompilerFlags% -DDLL_NAME=huge_graphs_demo -Fehuge_graphs_demo.exe %LibsDir%\framework_vulkan\win32_main.cpp -Fmhuge_graphs_demo.map /link %CommonLinkerFlags%
 
 popd

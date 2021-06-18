@@ -16,3 +16,6 @@
 [submodule "libs/graphics_utils"]
 	path = libs/graphics_utils
 	url = https://github.com/Ihaa21/graphics_utils.git
+[submodule "libs/profiling"]
+	path = libs/profiling
+	url = https://github.com/Ihaa21/profiling.git
