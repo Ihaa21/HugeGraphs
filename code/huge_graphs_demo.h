@@ -4,6 +4,7 @@
 
 #include "framework_vulkan\framework_vulkan.h"
 
+// TODO: Do we want this in frameowrk? Cant print debug logs in framework code...
 #define WIN32_PROFILING
 //#define CPU_PROFILING
 //#define X86_PROFILING
@@ -30,6 +31,20 @@ struct circle_entry
     v4 Color;
 };
 
+#pragma pack(push, 1)
+struct line_vertex
+{
+    v2 Pos;
+    v4 Color;
+};
+#pragma pack(pop)
+
+struct scene_buffer
+{
+    m4 VPTransform;
+    v2 ViewPort;
+};
+
 struct render_mesh
 {
     VkBuffer VertexBuffer;
@@ -43,18 +58,25 @@ struct render_scene
     camera Camera;
     VkDescriptorSetLayout SceneDescLayout;
     VkDescriptorSet SceneDescriptor;
-
+    VkBuffer SceneBuffer;
+    
     // NOTE: Scene Meshes
     u32 MaxNumRenderMeshes;
     u32 NumRenderMeshes;
     render_mesh* RenderMeshes;
     
-    // NOTE: Circle Instances
+    // NOTE: Circle Entries
     u32 CircleMeshId;
-    u32 MaxNumCircleInstances;
-    u32 NumCircleInstances;
-    circle_entry* CircleInstances;
-    VkBuffer CircleInstanceBuffer;
+    u32 MaxNumCircles;
+    u32 NumCircles;
+    circle_entry* CircleEntries;
+    VkBuffer CircleEntryBuffer;
+
+    // NOTE: Line Entries
+    u32 MaxNumLines;
+    u32 NumLines;
+    line_vertex* LinePoints;
+    VkBuffer LineVertexBuffer;
 };
 
 struct demo_state
@@ -85,12 +107,6 @@ struct demo_state
     // NOTE: Graph Draw
     vk_pipeline* CirclePipeline;
     vk_pipeline* LinePipeline;
-
-    u32 MaxNumLineVerts;
-    u32 NumLineVerts;
-    v3* LinePos;
-    v4* LineColors;
-    VkBuffer LineBuffer;
 };
 
 global demo_state* DemoState;

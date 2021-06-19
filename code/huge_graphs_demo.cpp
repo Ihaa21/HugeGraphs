@@ -16,19 +16,6 @@ inline f32 RandFloat()
     return Result;
 }
 
-inline void DebugPushLine(v2 Start, v2 End, v4 Color, u32 EntityId)
-{
-    Assert(DemoState->NumLineVerts < DemoState->MaxNumLineVerts);
-    DemoState->LinePos[DemoState->NumLineVerts] = V3(Start, 0);
-    DemoState->LineColors[DemoState->NumLineVerts] = Color;
-    DemoState->NumLineVerts++;
-        
-    Assert(DemoState->NumLineVerts < DemoState->MaxNumLineVerts);
-    DemoState->LinePos[DemoState->NumLineVerts] = V3(End, 0);
-    DemoState->LineColors[DemoState->NumLineVerts] = Color;
-    DemoState->NumLineVerts++;
-}
-
 //
 // NOTE: Asset Storage System
 //
@@ -52,13 +39,23 @@ inline u32 SceneMeshAdd(render_scene* Scene, procedural_mesh Mesh)
     return Result;
 }
 
-inline void SceneCircleInstanceAdd(render_scene* Scene, m4 WTransform, v4 Color)
+inline void SceneCircleInstanceAdd(render_scene* Scene, v2 Pos, f32 Scale, v4 Color)
 {
-    Assert(Scene->NumCircleInstances < Scene->MaxNumCircleInstances);
+    Assert(Scene->NumCircles < Scene->MaxNumCircles);
 
-    circle_entry* Instance = Scene->CircleInstances + Scene->NumCircleInstances++;
-    Instance->WVPTransform = CameraGetVP(&Scene->Camera)*WTransform;
-    Instance->Color = Color;
+    circle_entry* Entry = Scene->CircleEntries + Scene->NumCircles++;
+    Entry->WVPTransform = CameraGetVP(&Scene->Camera)*M4Pos(V3(Pos, -1.0f)) * M4Scale(V3(Scale));
+    Entry->Color = Color;
+}
+
+inline void SceneLineInstanceAdd(render_scene* Scene, v2 StartPos, v2 EndPos, v4 Color)
+{
+    Assert(Scene->NumLines < Scene->MaxNumLines);
+
+    Scene->LinePoints[2*Scene->NumLines + 0] = { StartPos, Color };
+    Scene->LinePoints[2*Scene->NumLines + 1] = { EndPos, Color };
+    
+    Scene->NumLines += 1;
 }
 
 //
@@ -130,28 +127,37 @@ DEMO_INIT(Init)
     {
         render_scene* Scene = &DemoState->Scene;
 
-        Scene->Camera = CameraFpsCreate(V3(0, 0, -2), V3(0, 0, 1), false, 1.0f, 0.05f);
-        f32 OrthoRadiusX = 1.0f;
-        f32 OrthoRadiusY = OrthoRadiusX / RenderState->WindowAspectRatio;
-        CameraSetOrtho(&Scene->Camera, -OrthoRadiusX, OrthoRadiusX, OrthoRadiusY, -OrthoRadiusY, 0.01f, 1000.0f);
+        Scene->Camera = CameraFlatCreate(V3(0, 0, -2), 1.0f, 1.0f, 0.1f, 0.01f, 1000.0f);
         
         Scene->MaxNumRenderMeshes = 1;
         Scene->RenderMeshes = PushArray(&DemoState->Arena, render_mesh, Scene->MaxNumRenderMeshes);
 
-        Scene->MaxNumCircleInstances = 10000;
-        Scene->CircleInstances = PushArray(&DemoState->Arena, circle_entry, Scene->MaxNumCircleInstances);
-        Scene->CircleInstanceBuffer = VkBufferCreate(RenderState->Device, &RenderState->GpuArena,
-                                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                                     sizeof(circle_entry)*Scene->MaxNumCircleInstances);
+        Scene->SceneBuffer = VkBufferCreate(RenderState->Device, &RenderState->GpuArena,
+                                            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                            sizeof(scene_buffer));
+        
+        Scene->MaxNumCircles = 10000;
+        Scene->CircleEntries = PushArray(&DemoState->Arena, circle_entry, Scene->MaxNumCircles);
+        Scene->CircleEntryBuffer = VkBufferCreate(RenderState->Device, &RenderState->GpuArena,
+                                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                  sizeof(circle_entry)*Scene->MaxNumCircles);
+
+        Scene->MaxNumLines = 10000;
+        Scene->LinePoints = PushArray(&DemoState->Arena, line_vertex, 2*Scene->MaxNumLines);
+        Scene->LineVertexBuffer = VkBufferCreate(RenderState->Device, &RenderState->GpuArena,
+                                                 VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                 sizeof(line_vertex)*2*Scene->MaxNumLines);
         
         {
             vk_descriptor_layout_builder Builder = VkDescriptorLayoutBegin(&Scene->SceneDescLayout);
+            VkDescriptorLayoutAdd(&Builder, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT);
             VkDescriptorLayoutAdd(&Builder, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT);
             VkDescriptorLayoutEnd(RenderState->Device, &Builder);
         }
 
         Scene->SceneDescriptor = VkDescriptorSetAllocate(RenderState->Device, RenderState->DescriptorPool, Scene->SceneDescLayout);
-        VkDescriptorBufferWrite(&RenderState->DescriptorManager, Scene->SceneDescriptor, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, Scene->CircleInstanceBuffer);
+        VkDescriptorBufferWrite(&RenderState->DescriptorManager, Scene->SceneDescriptor, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, Scene->SceneBuffer);
+        VkDescriptorBufferWrite(&RenderState->DescriptorManager, Scene->SceneDescriptor, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, Scene->CircleEntryBuffer);
     }
 
     // NOTE: Create render data
@@ -189,7 +195,7 @@ DEMO_INIT(Init)
             vk_pipeline_builder Builder = VkPipelineBuilderBegin(&DemoState->TempArena);
 
             // NOTE: Shaders
-            VkPipelineShaderAdd(&Builder, "shader_vert.spv", "main", VK_SHADER_STAGE_VERTEX_BIT);
+            VkPipelineShaderAdd(&Builder, "shader_circle_vert.spv", "main", VK_SHADER_STAGE_VERTEX_BIT);
             VkPipelineShaderAdd(&Builder, "shader_circle_frag.spv", "main", VK_SHADER_STAGE_FRAGMENT_BIT);
                 
             // NOTE: Specify input vertex data format
@@ -215,26 +221,27 @@ DEMO_INIT(Init)
                                                              DemoState->RenderTarget.RenderPass, 0, DescriptorLayouts,
                                                              ArrayCount(DescriptorLayouts));
         }
-                
-#if 0
-        // NOTE: Create Debug Line PSO
+     
+        // NOTE: Create Line PSO
         {
             vk_pipeline_builder Builder = VkPipelineBuilderBegin(&DemoState->TempArena);
 
             // NOTE: Shaders
-            VkPipelineShaderAdd(&Builder, "shader_debug_vert.spv", "main", VK_SHADER_STAGE_VERTEX_BIT);
-            VkPipelineShaderAdd(&Builder, "shader_debug_frag.spv", "main", VK_SHADER_STAGE_FRAGMENT_BIT);
+            VkPipelineShaderAdd(&Builder, "shader_line_vert.spv", "main", VK_SHADER_STAGE_VERTEX_BIT);
+            VkPipelineShaderAdd(&Builder, "shader_line_frag.spv", "main", VK_SHADER_STAGE_FRAGMENT_BIT);
                 
             // NOTE: Specify input vertex data format
             VkPipelineVertexBindingBegin(&Builder);
-            VkPipelineVertexAttributeAdd(&Builder, VK_FORMAT_R32G32B32_SFLOAT, sizeof(v3));
+            VkPipelineVertexAttributeAdd(&Builder, VK_FORMAT_R32G32_SFLOAT, sizeof(v2));
+            VkPipelineVertexAttributeAdd(&Builder, VK_FORMAT_R32G32B32A32_SFLOAT, sizeof(v4));
             VkPipelineVertexBindingEnd(&Builder);
 
             VkPipelineInputAssemblyAdd(&Builder, VK_PRIMITIVE_TOPOLOGY_LINE_LIST, VK_FALSE);
+            VkPipelineRasterizationSetLineWidth(&Builder, 2.0f);
             VkPipelineDepthStateAdd(&Builder, VK_FALSE, VK_FALSE, VK_COMPARE_OP_GREATER);
             
             // NOTE: Set the blending state
-            VkPipelineColorAttachmentAdd(&Builder, VK_BLEND_OP_ADD, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO,
+            VkPipelineColorAttachmentAdd(&Builder, VK_BLEND_OP_ADD, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
                                          VK_BLEND_OP_ADD, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO);
 
             VkDescriptorSetLayout DescriptorLayouts[] =
@@ -246,20 +253,20 @@ DEMO_INIT(Init)
                                                            DemoState->RenderTarget.RenderPass, 0, DescriptorLayouts,
                                                            ArrayCount(DescriptorLayouts));
         }
-#endif
     }
 
     // NOTE: Init graph nodes
     {
-        DemoState->NumGraphNodes = 16;
+        u32 NumNodesDim = 4;
+        DemoState->NumGraphNodes = NumNodesDim*NumNodesDim;
         DemoState->GraphNodes = PushArray(&DemoState->Arena, graph_node, DemoState->NumGraphNodes);
 
-        for (u32 Y = 0; Y < 4; ++Y)
+        for (u32 Y = 0; Y < NumNodesDim; ++Y)
         {
-            for (u32 X = 0; X < 4; ++X)
+            for (u32 X = 0; X < NumNodesDim; ++X)
             {
-                graph_node* CurrNode = DemoState->GraphNodes + Y * 4 + X;
-                CurrNode->Pos = V2(X, Y) - V2(2);
+                graph_node* CurrNode = DemoState->GraphNodes + Y * NumNodesDim + X;
+                CurrNode->Pos = V2(X, Y) - V2(f32(NumNodesDim) * 0.5f);
                 CurrNode->Scale = 0.2f;
                 CurrNode->Color = V3(1, 0, 0);
             }
@@ -343,7 +350,7 @@ DEMO_MAIN_LOOP(MainLoop)
             Copy(CurrInput->KeysDown, UiCurrInput.KeysDown, sizeof(UiCurrInput.KeysDown));
             UiStateBegin(UiState, FrameTime, RenderState->WindowWidth, RenderState->WindowHeight, UiCurrInput);
             local_global v2 PanelPos = V2(100, 800);
-            ui_panel Panel = UiPanelBegin(UiState, &PanelPos, "ClearPath Panel");
+            ui_panel Panel = UiPanelBegin(UiState, &PanelPos, "Huge Graphs Panel");
 
             {
                 UiPanelText(&Panel, "Sim Data:");
@@ -363,68 +370,95 @@ DEMO_MAIN_LOOP(MainLoop)
         // NOTE: Upload scene data
         {
             render_scene* Scene = &DemoState->Scene;
-            Scene->NumCircleInstances = 0;
+            Scene->NumCircles = 0;
+            Scene->NumLines = 0;
             if (!(DemoState->UiState.MouseTouchingUi || DemoState->UiState.ProcessedInteraction))
             {
-                CameraUpdate(&Scene->Camera, CurrInput, PrevInput);
+                CameraUpdate(&Scene->Camera, CurrInput, PrevInput, FrameTime);
             }
             
             // NOTE: Populate scene
             {
-                // NOTE: Add Instances
+                CPU_TIMED_BLOCK("Gen Render Instances");
+
+                // NOTE: Populate graph nodes
+                for (u32 NodeId = 0; NodeId < DemoState->NumGraphNodes; ++NodeId)
                 {
-                    temp_mem TempMem = BeginTempMem(&DemoState->TempArena);
+                    graph_node* CurrNode = DemoState->GraphNodes + NodeId;
+                    SceneCircleInstanceAdd(Scene, CurrNode->Pos, CurrNode->Scale, V4(CurrNode->Color, 1));
+                }
 
-#if 0
-                    // NOTE: Upload debug lines
+                // NOTE: Populate graph nodes
+                for (u32 CurrNodeId = 0; CurrNodeId < DemoState->NumGraphNodes; ++CurrNodeId)
+                {
+                    graph_node* CurrNode = DemoState->GraphNodes + CurrNodeId;
+
+                    for (u32 OtherNodeId = 0; OtherNodeId < DemoState->NumGraphNodes; ++OtherNodeId)
                     {
-                        u8* GpuData = VkCommandsPushWriteArray(Commands, DemoState->LineBuffer, u8, (sizeof(v3) + sizeof(v4)) * DemoState->MaxNumLineVerts,
-                                                               BarrierMask(VkAccessFlagBits(0), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT),
-                                                               BarrierMask(VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT));
-
-                        u32 Offset = 0;
-                        Copy(DemoState->LinePos, GpuData + Offset, sizeof(v3) * DemoState->MaxNumLineVerts);
-                        Offset += sizeof(v3) * DemoState->MaxNumLineVerts;
-                        Copy(DemoState->LineColors, GpuData + Offset, sizeof(v4) * DemoState->MaxNumLineVerts);
-                    }
-#endif
-                    
-                    EndTempMem(TempMem);
-
-                    // NOTE: Populate graph nodes
-                    {
-                        CPU_TIMED_BLOCK("Gen Render Instances");
-                        
-                        for (u32 NodeId = 0; NodeId < DemoState->NumGraphNodes; ++NodeId)
+                        graph_node* OtherNode = DemoState->GraphNodes + OtherNodeId;
+                        if (CurrNodeId != OtherNodeId)
                         {
-                            graph_node* CurrNode = DemoState->GraphNodes + NodeId;
-                            
-                            m4 Transform = M4Pos(V3(CurrNode->Pos, 0)) * M4Scale(V3(CurrNode->Scale));
-                            SceneCircleInstanceAdd(Scene, Transform, V4(CurrNode->Color, 1));
+                            SceneLineInstanceAdd(Scene, CurrNode->Pos, OtherNode->Pos, V4(0, 0, 1, 1));
                         }
                     }
                 }
+            }
 
+            // NOTE: Populate GPU Buffers
+            {
+                {
+                    CPU_TIMED_BLOCK("Upload scene buffer to  GPU");
+                    scene_buffer* GpuData = VkCommandsPushWriteStruct(Commands, Scene->SceneBuffer, scene_buffer,
+                                                                      BarrierMask(VkAccessFlagBits(0), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT),
+                                                                      BarrierMask(VK_ACCESS_UNIFORM_READ_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT));
+
+                    GpuData->VPTransform = CameraGetVP(&Scene->Camera);
+                    GpuData->ViewPort = V2(RenderState->WindowWidth, RenderState->WindowHeight);
+                }
+
+                if (Scene->NumCircles > 0)
                 {
                     CPU_TIMED_BLOCK("Upload circles to GPU");
-                    circle_entry* GpuData = VkCommandsPushWriteArray(Commands, Scene->CircleInstanceBuffer, circle_entry, Scene->NumCircleInstances,
+                    circle_entry* GpuData = VkCommandsPushWriteArray(Commands, Scene->CircleEntryBuffer, circle_entry, Scene->NumCircles,
                                                                      BarrierMask(VkAccessFlagBits(0), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT),
                                                                      BarrierMask(VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT));
-
-                    for (u32 CircleId = 0; CircleId < Scene->NumCircleInstances; ++CircleId)
-                    {
-                        GpuData[CircleId].WVPTransform = Scene->CircleInstances[CircleId].WVPTransform;
-                        GpuData[CircleId].Color = Scene->CircleInstances[CircleId].Color;
-                    }
+                    Copy(Scene->CircleEntries, GpuData, sizeof(circle_entry) * Scene->NumCircles);
                 }
-            }        
 
+                if (Scene->NumLines > 0)
+                {
+                    CPU_TIMED_BLOCK("Upload line vertex buffer to GPU");
+                    line_vertex* GpuData = VkCommandsPushWriteArray(Commands, Scene->LineVertexBuffer, line_vertex, 2*Scene->NumLines,
+                                                                    BarrierMask(VkAccessFlagBits(0), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT),
+                                                                    BarrierMask(VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT));
+                    Copy(Scene->LinePoints, GpuData, sizeof(line_vertex) * 2 * Scene->NumLines);
+                }
+            }
+            
             VkCommandsTransferFlush(Commands, RenderState->Device);
         }
 
         // NOTE: Render Scene
         render_scene* Scene = &DemoState->Scene;
         RenderTargetPassBegin(&DemoState->RenderTarget, Commands, RenderTargetRenderPass_SetViewPort | RenderTargetRenderPass_SetScissor);
+        {
+            CPU_TIMED_BLOCK("Render Lines");
+            
+            vkCmdBindPipeline(Commands->Buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, DemoState->LinePipeline->Handle);
+            {
+                VkDescriptorSet DescriptorSets[] =
+                    {
+                        Scene->SceneDescriptor,
+                    };
+                vkCmdBindDescriptorSets(Commands->Buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, DemoState->LinePipeline->Layout, 0,
+                                        ArrayCount(DescriptorSets), DescriptorSets, 0, 0);
+            }
+
+            VkDeviceSize Offset = 0;
+            vkCmdBindVertexBuffers(Commands->Buffer, 0, 1, &Scene->LineVertexBuffer, &Offset);
+
+            vkCmdDraw(Commands->Buffer, 2*Scene->NumLines, 1, 0, 0);
+        }
         {
             CPU_TIMED_BLOCK("Render Circle Nodes");
         
@@ -442,31 +476,8 @@ DEMO_MAIN_LOOP(MainLoop)
             VkDeviceSize Offset = 0;
             vkCmdBindVertexBuffers(Commands->Buffer, 0, 1, &CurrMesh->VertexBuffer, &Offset);
             vkCmdBindIndexBuffer(Commands->Buffer, CurrMesh->IndexBuffer, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(Commands->Buffer, CurrMesh->NumIndices, Scene->NumCircleInstances, 0, 0, 0);
+            vkCmdDrawIndexed(Commands->Buffer, CurrMesh->NumIndices, Scene->NumCircles, 0, 0, 0);
         }
-
-#if 0
-        // NOTE: Draw lines
-        {
-            vkCmdBindPipeline(Commands->Buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, DemoState->LinePipeline->Handle);
-            {
-                VkDescriptorSet DescriptorSets[] =
-                    {
-                        Scene->SceneDescriptor,
-                    };
-                vkCmdBindDescriptorSets(Commands->Buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, DemoState->LinePipeline->Layout, 0,
-                                        ArrayCount(DescriptorSets), DescriptorSets, 0, 0);
-            }
-
-
-            VkDeviceSize Offset = 0;
-            vkCmdBindVertexBuffers(Commands->Buffer, 0, 1, &DemoState->LineBuffer, &Offset);
-            Offset += sizeof(v3) * DemoState->MaxNumLineVerts;
-            vkCmdBindVertexBuffers(Commands->Buffer, 1, 1, &DemoState->LineBuffer, &Offset);
-
-            vkCmdDraw(Commands->Buffer, DemoState->NumLineVerts, 1, 0, 0);
-        }
-#endif
         
         RenderTargetPassEnd(Commands);        
         UiStateRender(&DemoState->UiState, RenderState->Device, Commands, DemoState->SwapChainEntry.View);

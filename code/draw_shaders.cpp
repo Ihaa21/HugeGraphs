@@ -9,16 +9,22 @@ struct circle_entry
     vec4 Color;
 };
 
-layout(set = 0, binding = 0) buffer instance_buffer
+layout(set = 0, binding = 0) uniform scene_buffer
+{
+    mat4 VPTransform;
+    vec2 ViewPort;
+} SceneBuffer;
+
+layout(set = 0, binding = 1) buffer circle_entry_buffer
 {
     circle_entry CircleEntries[];
 };
 
 //=========================================================================================================================================
-// NOTE: Vertex Shader
+// NOTE: Circle Vertex Shader
 //=========================================================================================================================================
 
-#if VERTEX_SHADER
+#if CIRCLE_VERTEX_SHADER
 
 layout(location = 0) in vec3 InPos;
 layout(location = 1) in vec2 InUv;
@@ -59,6 +65,63 @@ void main()
     float Alpha = 1.0f - smoothstep(Radius - ResDistDelta, Radius, Distance);
     
     // NOTE: Premul alpha
+    OutColor = vec4(InColor.rgb * Alpha, Alpha);
+}
+
+#endif
+
+//=========================================================================================================================================
+// NOTE: Line Vertex Shader
+//=========================================================================================================================================
+
+#if LINE_VERTEX_SHADER
+
+layout(location = 0) in vec2 InPos;
+layout(location = 1) in vec4 InColor;
+
+layout(location = 0) out vec4 OutColor;
+layout(location = 1) out vec2 OutLineCenter;
+
+void main()
+{
+    // NOTE: https://vitaliburkov.wordpress.com/2016/09/17/simple-and-fast-high-quality-antialiased-lines-with-opengl/
+    vec4 ProjectedPos = SceneBuffer.VPTransform * vec4(InPos, 0, 1);
+    
+    gl_Position = ProjectedPos;
+    OutColor = InColor;
+    OutLineCenter = 0.5 * (ProjectedPos.xy + vec2(1)) * SceneBuffer.ViewPort;
+}
+
+#endif
+
+//=========================================================================================================================================
+// NOTE: Line Fragment Shader
+//=========================================================================================================================================
+
+#if LINE_FRAGMENT_SHADER
+
+layout(location = 0) in vec4 InColor;
+layout(location = 1) in vec2 InLineCenter;
+
+layout(location = 0) out vec4 OutColor;
+
+void main()
+{
+    // NOTE: https://vitaliburkov.wordpress.com/2016/09/17/simple-and-fast-high-quality-antialiased-lines-with-opengl/
+    float LineWidth = 1.2f;
+    float BlendFactor = 2.5f;
+
+    float Alpha = InColor.a;
+    float DistanceFromCenter = length(InLineCenter - gl_FragCoord.xy);
+    if (DistanceFromCenter > LineWidth)
+    {
+        Alpha = 0.0f;
+    }
+    else
+    {
+        Alpha *= pow((LineWidth - DistanceFromCenter) / LineWidth, BlendFactor);
+    }
+    
     OutColor = vec4(InColor.rgb * Alpha, Alpha);
 }
 

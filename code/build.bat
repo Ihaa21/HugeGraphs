@@ -21,8 +21,11 @@ pushd %OutputDir%
 del *.pdb > NUL 2> NUL
 
 REM USING GLSL IN VK USING GLSLANGVALIDATOR
-call glslangValidator -DVERTEX_SHADER=1 -S vert -e main -g -V -o %DataDir%\shader_vert.spv %CodeDir%\draw_shaders.cpp
+call glslangValidator -DCIRCLE_VERTEX_SHADER=1 -S vert -e main -g -V -o %DataDir%\shader_circle_vert.spv %CodeDir%\draw_shaders.cpp
 call glslangValidator -DCIRCLE_FRAGMENT_SHADER=1 -S frag -e main -g -V -o %DataDir%\shader_circle_frag.spv %CodeDir%\draw_shaders.cpp
+
+call glslangValidator -DLINE_VERTEX_SHADER=1 -S vert -e main -g -V -o %DataDir%\shader_line_vert.spv %CodeDir%\draw_shaders.cpp
+call glslangValidator -DLINE_FRAGMENT_SHADER=1 -S frag -e main -g -V -o %DataDir%\shader_line_frag.spv %CodeDir%\draw_shaders.cpp
 
 REM USING HLSL IN VK USING DXC
 REM set DxcDir=C:\Tools\DirectXShaderCompiler\build\Debug\bin
