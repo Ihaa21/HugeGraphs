@@ -19,6 +19,11 @@ struct graph_node
     v3 Color;
     f32 Scale;
     v2 Pos;
+    v2 Vel;
+    v2 Accel;
+    u32 StartEdges;
+    u32 EndEdges;
+    u32 FamilyId;
 };
 
 //
@@ -100,9 +105,25 @@ struct demo_state
 
     ui_state UiState;
 
+    // NOTE: Graph Layout Params
+    f32 LayoutAvoidDiffRadius;
+    f32 LayoutAvoidDiffAccel;
+    f32 LayoutAvoidSameRadius;
+    f32 LayoutAvoidSameAccel;
+    f32 LayoutPullSameRadius;
+    f32 LayoutPullSameAccel;
+    f32 LayoutEdgeAccel;
+    f32 LayoutEdgeMinDist;
+
+    b32 PauseSim;
+    
     // NOTE: Graph Data
     u32 NumGraphNodes;
     graph_node* GraphNodes;
+
+    u32 MaxNumGraphEdges;
+    u32 NumGraphEdges;
+    u32* GraphEdges;
     
     // NOTE: Graph Draw
     vk_pipeline* CirclePipeline;

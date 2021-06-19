@@ -63,9 +63,13 @@ void main()
     float Distance = sqrt(DistanceVec.x * DistanceVec.x + DistanceVec.y * DistanceVec.y);
     float ResDistDelta = fwidth(Distance);
     float Alpha = 1.0f - smoothstep(Radius - ResDistDelta, Radius, Distance);
+
+    vec3 Color = InColor.rgb;
+    vec3 AddedColor = vec3(0.8*smoothstep(0, 0.5, 1 - (Radius - Distance) / 0.05));
+    Color.rgb = clamp(Color.rgb + AddedColor, 0, 1);
     
     // NOTE: Premul alpha
-    OutColor = vec4(InColor.rgb * Alpha, Alpha);
+    OutColor = vec4(Color * Alpha, Alpha);
 }
 
 #endif
@@ -107,9 +111,10 @@ layout(location = 0) out vec4 OutColor;
 
 void main()
 {
+    // TODO: This doesn't appear to work well with zooming camera?
     // NOTE: https://vitaliburkov.wordpress.com/2016/09/17/simple-and-fast-high-quality-antialiased-lines-with-opengl/
-    float LineWidth = 1.2f;
-    float BlendFactor = 2.5f;
+    float LineWidth = 1.5f;
+    float BlendFactor = 1.5f;
 
     float Alpha = InColor.a;
     float DistanceFromCenter = length(InLineCenter - gl_FragCoord.xy);

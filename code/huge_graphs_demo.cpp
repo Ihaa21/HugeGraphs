@@ -206,7 +206,7 @@ DEMO_INIT(Init)
             VkPipelineVertexBindingEnd(&Builder);
 
             VkPipelineInputAssemblyAdd(&Builder, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_FALSE);
-            VkPipelineDepthStateAdd(&Builder, VK_TRUE, VK_TRUE, VK_COMPARE_OP_GREATER);
+            VkPipelineDepthStateAdd(&Builder, VK_FALSE, VK_FALSE, VK_COMPARE_OP_GREATER);
             
             // NOTE: Set the blending state
             VkPipelineColorAttachmentAdd(&Builder, VK_BLEND_OP_ADD, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
@@ -257,18 +257,148 @@ DEMO_INIT(Init)
 
     // NOTE: Init graph nodes
     {
-        u32 NumNodesDim = 4;
-        DemoState->NumGraphNodes = NumNodesDim*NumNodesDim;
-        DemoState->GraphNodes = PushArray(&DemoState->Arena, graph_node, DemoState->NumGraphNodes);
+        // NOTE: Setup default layout params
+#if 0
+        DemoState->LayoutAvoidDiffRadius = 0.5f;
+        DemoState->LayoutAvoidDiffAccel = 1.0f;
+        DemoState->LayoutAvoidSameRadius = 0;
+        DemoState->LayoutAvoidSameAccel = 0;
+        DemoState->LayoutPullSameRadius = 0;
+        DemoState->LayoutPullSameAccel = 0;
+        DemoState->LayoutEdgeMinDist = 0.3f;
+        DemoState->LayoutEdgeAccel = 1.0f;
+#endif
+        DemoState->LayoutAvoidDiffRadius = 1.79f;
+        DemoState->LayoutAvoidDiffAccel = 1.82f;
+        DemoState->LayoutAvoidSameRadius = 0.35f;
+        DemoState->LayoutAvoidSameAccel = 0.82f;
+        DemoState->LayoutPullSameRadius = 1.117f;
+        DemoState->LayoutPullSameAccel = 0.1f;
+        DemoState->LayoutEdgeMinDist = 0.42f;
+        DemoState->LayoutEdgeAccel = 2.12f;
 
-        for (u32 Y = 0; Y < NumNodesDim; ++Y)
+        DemoState->PauseSim = true;
+        
+        u32 RedNodesStart1 = 0;
+        u32 NumRedNodes1 = 8;
+        u32 RedNodesStart2 = RedNodesStart1 + NumRedNodes1;
+        u32 NumRedNodes2 = 8;
+        u32 RedNodesStart3 = RedNodesStart2 + NumRedNodes2;
+        u32 NumRedNodes3 = 8;
+
+        u32 BlackNodesStart1 = RedNodesStart3 + NumRedNodes3;
+        u32 NumBlackNodes1 = 8;
+        u32 BlackNodesStart2 = BlackNodesStart1 + NumBlackNodes1;
+        u32 NumBlackNodes2 = 8;
+        DemoState->NumGraphNodes = NumRedNodes1 + NumRedNodes2 + NumRedNodes3 + NumBlackNodes1 + NumBlackNodes2;
+        DemoState->GraphNodes = PushArray(&DemoState->Arena, graph_node, DemoState->NumGraphNodes);
+        DemoState->MaxNumGraphEdges = Square(DemoState->NumGraphNodes);
+        DemoState->GraphEdges = PushArray(&DemoState->Arena, u32, DemoState->MaxNumGraphEdges);
+
+        // NOTE: Create Nodes
         {
-            for (u32 X = 0; X < NumNodesDim; ++X)
+            for (u32 RedNodeId = RedNodesStart1; RedNodeId < RedNodesStart1 + NumRedNodes1; ++RedNodeId)
             {
-                graph_node* CurrNode = DemoState->GraphNodes + Y * NumNodesDim + X;
-                CurrNode->Pos = V2(X, Y) - V2(f32(NumNodesDim) * 0.5f);
+                graph_node* CurrNode = DemoState->GraphNodes + RedNodeId;
+                *CurrNode = {};
+                CurrNode->Pos = V2(0, 0); //V2(f32(RedNodeId), 0.0f);
                 CurrNode->Scale = 0.2f;
                 CurrNode->Color = V3(1, 0, 0);
+                CurrNode->FamilyId = 0;
+            }
+
+            for (u32 RedNodeId = RedNodesStart2; RedNodeId < RedNodesStart2 + NumRedNodes2; ++RedNodeId)
+            {
+                graph_node* CurrNode = DemoState->GraphNodes + RedNodeId;
+                *CurrNode = {};
+                CurrNode->Pos = V2(0, 0); //V2(f32(RedNodeId), 0.0f);
+                CurrNode->Scale = 0.2f;
+                CurrNode->Color = V3(1, 0, 0);
+                CurrNode->FamilyId = 0;
+            }
+
+            for (u32 RedNodeId = RedNodesStart3; RedNodeId < RedNodesStart3 + NumRedNodes3; ++RedNodeId)
+            {
+                graph_node* CurrNode = DemoState->GraphNodes + RedNodeId;
+                *CurrNode = {};
+                CurrNode->Pos = V2(0, 0); //V2(f32(RedNodeId), 0.0f);
+                CurrNode->Scale = 0.2f;
+                CurrNode->Color = V3(1, 0, 0);
+                CurrNode->FamilyId = 0;
+            }
+
+            for (u32 BlackNodeId = BlackNodesStart1; BlackNodeId < BlackNodesStart1 + NumBlackNodes1; ++BlackNodeId)
+            {
+                graph_node* CurrNode = DemoState->GraphNodes + BlackNodeId;
+                *CurrNode = {};
+                CurrNode->Pos = V2(0, 0); //V2(f32(BlackNodeId), 1.0f);
+                CurrNode->Scale = 0.2f;
+                CurrNode->Color = V3(0, 0, 0);
+                CurrNode->FamilyId = 1;
+            }
+
+            for (u32 BlackNodeId = BlackNodesStart2; BlackNodeId < BlackNodesStart2 + NumBlackNodes2; ++BlackNodeId)
+            {
+                graph_node* CurrNode = DemoState->GraphNodes + BlackNodeId;
+                *CurrNode = {};
+                CurrNode->Pos = V2(0, 0); //V2(f32(BlackNodeId), 1.0f);
+                CurrNode->Scale = 0.2f;
+                CurrNode->Color = V3(0, 0, 0);
+                CurrNode->FamilyId = 1;
+            }
+        }
+
+        // NOTE: Create edges
+        {
+            // NOTE: Connect red group 1 to black group 1
+            for (u32 RedNodeId = RedNodesStart1; RedNodeId < RedNodesStart1 + NumRedNodes1; ++RedNodeId)
+            {
+                graph_node* RedNode = DemoState->GraphNodes + RedNodeId;
+                RedNode->StartEdges = DemoState->NumGraphEdges;
+                RedNode->EndEdges = DemoState->NumGraphEdges;
+
+                for (u32 BlackNodeId = BlackNodesStart1; BlackNodeId < BlackNodesStart1 + NumBlackNodes1; ++BlackNodeId)
+                {
+                    graph_node* BlackNode = DemoState->GraphNodes + BlackNodeId;
+
+                    Assert(DemoState->NumGraphEdges < DemoState->MaxNumGraphEdges);
+                    DemoState->GraphEdges[DemoState->NumGraphEdges++] = BlackNodeId;
+                    RedNode->EndEdges += 1;
+                }
+            }
+
+            // NOTE: Connect red group 2 to black group 2
+            for (u32 RedNodeId = RedNodesStart2; RedNodeId < RedNodesStart2 + NumRedNodes2; ++RedNodeId)
+            {
+                graph_node* RedNode = DemoState->GraphNodes + RedNodeId;
+                RedNode->StartEdges = DemoState->NumGraphEdges;
+                RedNode->EndEdges = DemoState->NumGraphEdges;
+
+                for (u32 BlackNodeId = BlackNodesStart2; BlackNodeId < BlackNodesStart2 + NumBlackNodes2; ++BlackNodeId)
+                {
+                    graph_node* BlackNode = DemoState->GraphNodes + BlackNodeId;
+
+                    Assert(DemoState->NumGraphEdges < DemoState->MaxNumGraphEdges);
+                    DemoState->GraphEdges[DemoState->NumGraphEdges++] = BlackNodeId;
+                    RedNode->EndEdges += 1;
+                }
+            }
+
+            // NOTE: Connect red group 3 to black group 1 and 2
+            for (u32 RedNodeId = RedNodesStart3; RedNodeId < RedNodesStart3 + NumRedNodes3; ++RedNodeId)
+            {
+                graph_node* RedNode = DemoState->GraphNodes + RedNodeId;
+                RedNode->StartEdges = DemoState->NumGraphEdges;
+                RedNode->EndEdges = DemoState->NumGraphEdges;
+
+                for (u32 BlackNodeId = BlackNodesStart1; BlackNodeId < BlackNodesStart1 + NumBlackNodes1 + NumBlackNodes2; ++BlackNodeId)
+                {
+                    graph_node* BlackNode = DemoState->GraphNodes + BlackNodeId;
+
+                    Assert(DemoState->NumGraphEdges < DemoState->MaxNumGraphEdges);
+                    DemoState->GraphEdges[DemoState->NumGraphEdges++] = BlackNodeId;
+                    RedNode->EndEdges += 1;
+                }
             }
         }
     }
@@ -349,22 +479,156 @@ DEMO_MAIN_LOOP(MainLoop)
             UiCurrInput.MouseScroll = CurrInput->MouseScroll;
             Copy(CurrInput->KeysDown, UiCurrInput.KeysDown, sizeof(UiCurrInput.KeysDown));
             UiStateBegin(UiState, FrameTime, RenderState->WindowWidth, RenderState->WindowHeight, UiCurrInput);
-            local_global v2 PanelPos = V2(100, 800);
+            local_global v2 PanelPos = V2(100, 400);
             ui_panel Panel = UiPanelBegin(UiState, &PanelPos, "Huge Graphs Panel");
 
             {
                 UiPanelText(&Panel, "Sim Data:");
 
                 UiPanelNextRowIndent(&Panel);
+                UiPanelText(&Panel, "PauseSim:");
+                UiPanelCheckBox(&Panel, &DemoState->PauseSim);
+                UiPanelNextRow(&Panel);            
+
+                UiPanelNextRowIndent(&Panel);
                 UiPanelText(&Panel, "FrameTime:");
                 UiPanelHorizontalSlider(&Panel, 0.0f, 0.03f, &ModifiedFrameTime);
                 UiPanelNumberBox(&Panel, 0.0f, 0.03f, &ModifiedFrameTime);
+                UiPanelNextRow(&Panel);            
+
+                UiPanelNextRowIndent(&Panel);
+                UiPanelText(&Panel, "Avoid Diff Radius:");
+                UiPanelHorizontalSlider(&Panel, 0.0f, 10.0f, &DemoState->LayoutAvoidDiffRadius);
+                UiPanelNumberBox(&Panel, 0.0f, 10.0f, &DemoState->LayoutAvoidDiffRadius);
+                UiPanelNextRow(&Panel);            
+
+                UiPanelNextRowIndent(&Panel);
+                UiPanelText(&Panel, "Avoid Diff Accel:");
+                UiPanelHorizontalSlider(&Panel, 0.0f, 10.0f, &DemoState->LayoutAvoidDiffAccel);
+                UiPanelNumberBox(&Panel, 0.0f, 10.0f, &DemoState->LayoutAvoidDiffAccel);
+                UiPanelNextRow(&Panel);            
+
+                UiPanelNextRowIndent(&Panel);
+                UiPanelText(&Panel, "Avoid Same Radius:");
+                UiPanelHorizontalSlider(&Panel, 0.0f, 10.0f, &DemoState->LayoutAvoidSameRadius);
+                UiPanelNumberBox(&Panel, 0.0f, 10.0f, &DemoState->LayoutAvoidSameRadius);
+                UiPanelNextRow(&Panel);            
+
+                UiPanelNextRowIndent(&Panel);
+                UiPanelText(&Panel, "Avoid Same Accel:");
+                UiPanelHorizontalSlider(&Panel, 0.0f, 10.0f, &DemoState->LayoutAvoidSameAccel);
+                UiPanelNumberBox(&Panel, 0.0f, 10.0f, &DemoState->LayoutAvoidSameAccel);
+                UiPanelNextRow(&Panel);            
+
+                UiPanelNextRowIndent(&Panel);
+                UiPanelText(&Panel, "Pull Same Radius:");
+                UiPanelHorizontalSlider(&Panel, 0.0f, 10.0f, &DemoState->LayoutPullSameRadius);
+                UiPanelNumberBox(&Panel, 0.0f, 10.0f, &DemoState->LayoutPullSameRadius);
+                UiPanelNextRow(&Panel);            
+
+                UiPanelNextRowIndent(&Panel);
+                UiPanelText(&Panel, "Pull Same Accel:");
+                UiPanelHorizontalSlider(&Panel, 0.0f, 10.0f, &DemoState->LayoutPullSameAccel);
+                UiPanelNumberBox(&Panel, 0.0f, 10.0f, &DemoState->LayoutPullSameAccel);
+                UiPanelNextRow(&Panel);            
+
+                UiPanelNextRowIndent(&Panel);
+                UiPanelText(&Panel, "Edge Min Dist:");
+                UiPanelHorizontalSlider(&Panel, 0.0f, 10.0f, &DemoState->LayoutEdgeMinDist);
+                UiPanelNumberBox(&Panel, 0.0f, 10.0f, &DemoState->LayoutEdgeMinDist);
+                UiPanelNextRow(&Panel);            
+
+                UiPanelNextRowIndent(&Panel);
+                UiPanelText(&Panel, "Edge Accel:");
+                UiPanelHorizontalSlider(&Panel, 0.0f, 10.0f, &DemoState->LayoutEdgeAccel);
+                UiPanelNumberBox(&Panel, 0.0f, 10.0f, &DemoState->LayoutEdgeAccel);
                 UiPanelNextRow(&Panel);            
             }
 
             UiPanelEnd(&Panel);
 
             UiStateEnd(UiState, &RenderState->DescriptorManager);
+        }
+
+        // NOTE: Simluate graph layout
+        if (!DemoState->PauseSim)
+        {
+            // NOTE: Move connected nodes closer to each other
+            for (u32 CurrNodeId = 0; CurrNodeId < DemoState->NumGraphNodes; ++CurrNodeId)
+            {
+                graph_node* CurrNode = DemoState->GraphNodes + CurrNodeId;
+
+                for (u32 EdgeId = CurrNode->StartEdges; EdgeId < CurrNode->EndEdges; ++EdgeId)
+                {
+                    u32 OtherNodeId = DemoState->GraphEdges[EdgeId];
+                    graph_node* OtherNode = DemoState->GraphNodes + OtherNodeId;
+
+                    f32 DistanceSq = LengthSquared(CurrNode->Pos - OtherNode->Pos);
+                    if (DistanceSq > Square(DemoState->LayoutEdgeMinDist))
+                    {
+                        v2 Accel = DemoState->LayoutEdgeAccel * Normalize(CurrNode->Pos - OtherNode->Pos);
+                        CurrNode->Accel -= Accel;
+                        OtherNode->Accel += Accel;
+                    }
+                }
+            }
+
+            // NOTE: Move nodes away if they are too close to eachother or pull together
+            for (u32 CurrNodeId = 0; CurrNodeId < DemoState->NumGraphNodes; ++CurrNodeId)
+            {
+                graph_node* CurrNode = DemoState->GraphNodes + CurrNodeId;
+                for (u32 OtherNodeId = 0; OtherNodeId < DemoState->NumGraphNodes; ++OtherNodeId)
+                {
+                    graph_node* OtherNode = DemoState->GraphNodes + OtherNodeId;
+
+                    if (CurrNodeId != OtherNodeId)
+                    {
+                        b32 SameFamily = CurrNode->FamilyId == OtherNode->FamilyId;
+                        f32 AvoidRadius = SameFamily ? DemoState->LayoutAvoidSameRadius : DemoState->LayoutAvoidDiffRadius;
+                        f32 AvoidAccel = SameFamily ? DemoState->LayoutAvoidSameAccel : DemoState->LayoutAvoidDiffAccel;
+                        
+                        f32 DistanceSq = LengthSquared(CurrNode->Pos - OtherNode->Pos);
+                        if (DistanceSq < Square(AvoidRadius))
+                        {
+                            f32 T = DistanceSq / AvoidRadius;
+                            f32 AvoidAccelMag = Lerp(AvoidAccel, 0.0f, T);
+
+                            v2 Dir = {};
+                            if (DistanceSq == 0.0f)
+                            {
+                                Dir = Normalize(V2(RandFloat(), RandFloat()));
+                            }
+                            else
+                            {
+                                Dir = Normalize(CurrNode->Pos - OtherNode->Pos);
+                            }
+
+                            CurrNode->Accel += Dir * AvoidAccelMag;
+                            OtherNode->Accel -= Dir * AvoidAccelMag;
+                        }
+                        else if (SameFamily && DistanceSq < Square(DemoState->LayoutPullSameRadius))
+                        {
+                            v2 Accel = DemoState->LayoutPullSameAccel * Normalize(CurrNode->Pos - OtherNode->Pos);
+                            
+                            CurrNode->Accel -= Accel;
+                            OtherNode->Accel += Accel;
+                        }
+                    }
+                }
+            }
+
+            // NOTE: Update node positions
+            for (u32 CurrNodeId = 0; CurrNodeId < DemoState->NumGraphNodes; ++CurrNodeId)
+            {
+                graph_node* CurrNode = DemoState->GraphNodes + CurrNodeId;
+                
+                CurrNode->Vel += CurrNode->Accel * ModifiedFrameTime;
+                CurrNode->Pos += CurrNode->Vel * ModifiedFrameTime;
+
+                // NOTE: Reset so that accel doesn't blow up to infinity
+                CurrNode->Accel = {};
+                CurrNode->Vel = {};
+            }
         }
 
         // NOTE: Upload scene data
@@ -388,18 +652,17 @@ DEMO_MAIN_LOOP(MainLoop)
                     SceneCircleInstanceAdd(Scene, CurrNode->Pos, CurrNode->Scale, V4(CurrNode->Color, 1));
                 }
 
-                // NOTE: Populate graph nodes
+                // NOTE: Populate graph edges
                 for (u32 CurrNodeId = 0; CurrNodeId < DemoState->NumGraphNodes; ++CurrNodeId)
                 {
                     graph_node* CurrNode = DemoState->GraphNodes + CurrNodeId;
 
-                    for (u32 OtherNodeId = 0; OtherNodeId < DemoState->NumGraphNodes; ++OtherNodeId)
+                    for (u32 EdgeId = CurrNode->StartEdges; EdgeId < CurrNode->EndEdges; ++EdgeId)
                     {
+                        u32 OtherNodeId = DemoState->GraphEdges[EdgeId];
                         graph_node* OtherNode = DemoState->GraphNodes + OtherNodeId;
-                        if (CurrNodeId != OtherNodeId)
-                        {
-                            SceneLineInstanceAdd(Scene, CurrNode->Pos, OtherNode->Pos, V4(0, 0, 1, 1));
-                        }
+                        
+                        SceneLineInstanceAdd(Scene, CurrNode->Pos, OtherNode->Pos, V4(0, 0, 1, 1));
                     }
                 }
             }
