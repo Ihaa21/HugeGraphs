@@ -14,16 +14,23 @@
 // NOTE: Graph Data
 //
 
-struct graph_node
+struct graph_node_pos
+{
+    v2 Pos;
+    u32 FamilyId;
+    u32 Pad;
+};
+
+struct graph_node_edges
+{
+    u32 StartConnections;
+    u32 EndConnections;
+};
+
+struct graph_node_draw
 {
     v3 Color;
     f32 Scale;
-    v2 Pos;
-    v2 Vel;
-    v2 Accel;
-    u32 StartEdges;
-    u32 EndEdges;
-    u32 FamilyId;
 };
 
 //
@@ -44,10 +51,22 @@ struct line_vertex
 };
 #pragma pack(pop)
 
-struct scene_buffer
+struct graph_globals
 {
     m4 VPTransform;
     v2 ViewPort;
+    f32 FrameTime;
+    u32 NumNodes;
+
+    // NOTE: Layout Data
+    f32 LayoutAvoidDiffRadius;
+    f32 LayoutAvoidDiffAccel;
+    f32 LayoutAvoidSameRadius;
+    f32 LayoutAvoidSameAccel;
+    f32 LayoutPullSameRadius;
+    f32 LayoutPullSameAccel;
+    f32 LayoutEdgeAccel;
+    f32 LayoutEdgeMinDist;
 };
 
 struct render_mesh
@@ -61,27 +80,12 @@ struct render_scene
 {
     // NOTE: General Render Data
     camera Camera;
-    VkDescriptorSetLayout SceneDescLayout;
-    VkDescriptorSet SceneDescriptor;
-    VkBuffer SceneBuffer;
     
     // NOTE: Scene Meshes
     u32 MaxNumRenderMeshes;
     u32 NumRenderMeshes;
     render_mesh* RenderMeshes;
-    
-    // NOTE: Circle Entries
     u32 CircleMeshId;
-    u32 MaxNumCircles;
-    u32 NumCircles;
-    circle_entry* CircleEntries;
-    VkBuffer CircleEntryBuffer;
-
-    // NOTE: Line Entries
-    u32 MaxNumLines;
-    u32 NumLines;
-    line_vertex* LinePoints;
-    VkBuffer LineVertexBuffer;
 };
 
 struct demo_state
@@ -105,7 +109,7 @@ struct demo_state
 
     ui_state UiState;
 
-    // NOTE: Graph Layout Params
+    // NOTE: Layout Data
     f32 LayoutAvoidDiffRadius;
     f32 LayoutAvoidDiffAccel;
     f32 LayoutAvoidSameRadius;
@@ -114,18 +118,32 @@ struct demo_state
     f32 LayoutPullSameAccel;
     f32 LayoutEdgeAccel;
     f32 LayoutEdgeMinDist;
-
-    b32 PauseSim;
     
-    // NOTE: Graph Data
+    // NOTE: Graph Sim
+    b32 PauseSim;
     u32 NumGraphNodes;
-    graph_node* GraphNodes;
-
-    u32 MaxNumGraphEdges;
+    u32 NumGraphRedNodes;
     u32 NumGraphEdges;
-    u32* GraphEdges;
+    u32 NumGraphDrawEdges;
+    
+    VkDescriptorSetLayout GraphDescLayout;
+    VkDescriptorSet GraphDescriptor;
+    VkBuffer GraphGlobalsBuffer;
+    VkBuffer NodePositionBuffer;
+    VkBuffer NodeVelocityBuffer;
+    VkBuffer NodeEdgeBuffer;
+    VkBuffer EdgeBuffer;
+        
+    vk_pipeline* GraphMoveConnectionsPipeline;
+    vk_pipeline* GraphNearbyPipeline;
+    vk_pipeline* GraphUpdateNodesPipeline;
+    vk_pipeline* GraphGenEdgesPipeline;
     
     // NOTE: Graph Draw
+    VkBuffer NodeDrawBuffer;
+    VkBuffer EdgePositionBuffer;
+    VkBuffer EdgeColorBuffer;
+
     vk_pipeline* CirclePipeline;
     vk_pipeline* LinePipeline;
 };

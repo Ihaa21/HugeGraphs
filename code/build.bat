@@ -8,7 +8,7 @@ set VulkanIncludeDir="C:\VulkanSDK\1.2.135.0\Include\vulkan"
 set VulkanBinDir="C:\VulkanSDK\1.2.135.0\Bin"
 set AssimpDir=%LibsDir%\framework_vulkan
 
-set CommonCompilerFlags=-Od -MTd -nologo -fp:fast -fp:except- -EHsc -Gm- -GR- -EHa- -Zo -Oi -WX -W4 -wd4127 -wd4201 -wd4100 -wd4189 -wd4505 -Z7 -FC
+set CommonCompilerFlags=-O2 -MTd -nologo -fp:fast -fp:except- -EHsc -Gm- -GR- -EHa- -Zo -Oi -WX -W4 -wd4127 -wd4201 -wd4100 -wd4189 -wd4505 -Z7 -FC
 set CommonCompilerFlags=-I %VulkanIncludeDir% %CommonCompilerFlags%
 set CommonCompilerFlags=-I %LibsDir% -I %AssimpDir% %CommonCompilerFlags%
 REM Check the DLLs here
@@ -21,11 +21,16 @@ pushd %OutputDir%
 del *.pdb > NUL 2> NUL
 
 REM USING GLSL IN VK USING GLSLANGVALIDATOR
-call glslangValidator -DCIRCLE_VERTEX_SHADER=1 -S vert -e main -g -V -o %DataDir%\shader_circle_vert.spv %CodeDir%\draw_shaders.cpp
-call glslangValidator -DCIRCLE_FRAGMENT_SHADER=1 -S frag -e main -g -V -o %DataDir%\shader_circle_frag.spv %CodeDir%\draw_shaders.cpp
+call glslangValidator -DCIRCLE_VERTEX_SHADER=1 -S vert -e main -g -V -o %DataDir%\shader_circle_vert.spv %CodeDir%\graph_shaders.cpp
+call glslangValidator -DCIRCLE_FRAGMENT_SHADER=1 -S frag -e main -g -V -o %DataDir%\shader_circle_frag.spv %CodeDir%\graph_shaders.cpp
 
-call glslangValidator -DLINE_VERTEX_SHADER=1 -S vert -e main -g -V -o %DataDir%\shader_line_vert.spv %CodeDir%\draw_shaders.cpp
-call glslangValidator -DLINE_FRAGMENT_SHADER=1 -S frag -e main -g -V -o %DataDir%\shader_line_frag.spv %CodeDir%\draw_shaders.cpp
+call glslangValidator -DLINE_VERTEX_SHADER=1 -S vert -e main -g -V -o %DataDir%\shader_line_vert.spv %CodeDir%\graph_shaders.cpp
+call glslangValidator -DLINE_FRAGMENT_SHADER=1 -S frag -e main -g -V -o %DataDir%\shader_line_frag.spv %CodeDir%\graph_shaders.cpp
+
+call glslangValidator -DGRAPH_MOVE_CONNECTIONS=1 -S comp -e main -g -V -o %DataDir%\shader_graph_move_connections.spv %CodeDir%\graph_shaders.cpp
+call glslangValidator -DGRAPH_NEARBY=1 -S comp -e main -g -V -o %DataDir%\shader_graph_nearby.spv %CodeDir%\graph_shaders.cpp
+call glslangValidator -DGRAPH_UPDATE_NODES=1 -S comp -e main -g -V -o %DataDir%\shader_graph_update_nodes.spv %CodeDir%\graph_shaders.cpp
+call glslangValidator -DGRAPH_GEN_EDGES=1 -S comp -e main -g -V -o %DataDir%\shader_graph_gen_edges.spv %CodeDir%\graph_shaders.cpp
 
 REM USING HLSL IN VK USING DXC
 REM set DxcDir=C:\Tools\DirectXShaderCompiler\build\Debug\bin

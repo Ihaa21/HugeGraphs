@@ -39,25 +39,6 @@ inline u32 SceneMeshAdd(render_scene* Scene, procedural_mesh Mesh)
     return Result;
 }
 
-inline void SceneCircleInstanceAdd(render_scene* Scene, v2 Pos, f32 Scale, v4 Color)
-{
-    Assert(Scene->NumCircles < Scene->MaxNumCircles);
-
-    circle_entry* Entry = Scene->CircleEntries + Scene->NumCircles++;
-    Entry->WVPTransform = CameraGetVP(&Scene->Camera)*M4Pos(V3(Pos, -1.0f)) * M4Scale(V3(Scale));
-    Entry->Color = Color;
-}
-
-inline void SceneLineInstanceAdd(render_scene* Scene, v2 StartPos, v2 EndPos, v4 Color)
-{
-    Assert(Scene->NumLines < Scene->MaxNumLines);
-
-    Scene->LinePoints[2*Scene->NumLines + 0] = { StartPos, Color };
-    Scene->LinePoints[2*Scene->NumLines + 1] = { EndPos, Color };
-    
-    Scene->NumLines += 1;
-}
-
 //
 // NOTE: Demo Code
 //
@@ -108,7 +89,7 @@ DEMO_INIT(Init)
             InitParams.ValidationEnabled = true;
             InitParams.WindowWidth = WindowWidth;
             InitParams.WindowHeight = WindowHeight;
-            InitParams.GpuLocalSize = MegaBytes(10);
+            InitParams.GpuLocalSize = GigaBytes(1);
             InitParams.DeviceExtensionCount = ArrayCount(DeviceExtensions);
             InitParams.DeviceExtensions = DeviceExtensions;
             VkInit(VulkanLib, hInstance, WindowHandle, &DemoState->Arena, &DemoState->TempArena, InitParams);
@@ -131,35 +112,68 @@ DEMO_INIT(Init)
         
         Scene->MaxNumRenderMeshes = 1;
         Scene->RenderMeshes = PushArray(&DemoState->Arena, render_mesh, Scene->MaxNumRenderMeshes);
+    }
 
-        Scene->SceneBuffer = VkBufferCreate(RenderState->Device, &RenderState->GpuArena,
-                                            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                            sizeof(scene_buffer));
-        
-        Scene->MaxNumCircles = 10000;
-        Scene->CircleEntries = PushArray(&DemoState->Arena, circle_entry, Scene->MaxNumCircles);
-        Scene->CircleEntryBuffer = VkBufferCreate(RenderState->Device, &RenderState->GpuArena,
-                                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                                  sizeof(circle_entry)*Scene->MaxNumCircles);
-
-        Scene->MaxNumLines = 10000;
-        Scene->LinePoints = PushArray(&DemoState->Arena, line_vertex, 2*Scene->MaxNumLines);
-        Scene->LineVertexBuffer = VkBufferCreate(RenderState->Device, &RenderState->GpuArena,
-                                                 VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                                 sizeof(line_vertex)*2*Scene->MaxNumLines);
-        
+    // NOTE: Init Graph Layout Data
+    {
         {
-            vk_descriptor_layout_builder Builder = VkDescriptorLayoutBegin(&Scene->SceneDescLayout);
+            vk_descriptor_layout_builder Builder = VkDescriptorLayoutBegin(&DemoState->GraphDescLayout);
             VkDescriptorLayoutAdd(&Builder, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT);
+            VkDescriptorLayoutAdd(&Builder, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT);
+            VkDescriptorLayoutAdd(&Builder, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT);
+            VkDescriptorLayoutAdd(&Builder, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT);
+            VkDescriptorLayoutAdd(&Builder, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT);
+            VkDescriptorLayoutAdd(&Builder, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT);
+            VkDescriptorLayoutAdd(&Builder, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT);
             VkDescriptorLayoutAdd(&Builder, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT);
             VkDescriptorLayoutEnd(RenderState->Device, &Builder);
         }
 
-        Scene->SceneDescriptor = VkDescriptorSetAllocate(RenderState->Device, RenderState->DescriptorPool, Scene->SceneDescLayout);
-        VkDescriptorBufferWrite(&RenderState->DescriptorManager, Scene->SceneDescriptor, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, Scene->SceneBuffer);
-        VkDescriptorBufferWrite(&RenderState->DescriptorManager, Scene->SceneDescriptor, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, Scene->CircleEntryBuffer);
-    }
+        // NOTE: Graph Move Connections Pipeline
+        {
+            VkDescriptorSetLayout Layouts[] =
+                {
+                    DemoState->GraphDescLayout,
+                };
+            
+            DemoState->GraphMoveConnectionsPipeline = VkPipelineComputeCreate(RenderState->Device, &RenderState->PipelineManager, &DemoState->TempArena,
+                                                                              "shader_graph_move_connections.spv", "main", Layouts, ArrayCount(Layouts));
+        }
 
+        // NOTE: Graph Nearby Pipeline
+        {
+            VkDescriptorSetLayout Layouts[] =
+                {
+                    DemoState->GraphDescLayout,
+                };
+            
+            DemoState->GraphNearbyPipeline = VkPipelineComputeCreate(RenderState->Device, &RenderState->PipelineManager, &DemoState->TempArena,
+                                                                     "shader_graph_nearby.spv", "main", Layouts, ArrayCount(Layouts));
+        }
+
+        // NOTE: Graph Update Nodes Pipeline
+        {
+            VkDescriptorSetLayout Layouts[] =
+                {
+                    DemoState->GraphDescLayout,
+                };
+            
+            DemoState->GraphUpdateNodesPipeline = VkPipelineComputeCreate(RenderState->Device, &RenderState->PipelineManager, &DemoState->TempArena,
+                                                                          "shader_graph_update_nodes.spv", "main", Layouts, ArrayCount(Layouts));
+        }
+
+        // NOTE: Graph Gen Edges Pipeline
+        {
+            VkDescriptorSetLayout Layouts[] =
+                {
+                    DemoState->GraphDescLayout,
+                };
+            
+            DemoState->GraphGenEdgesPipeline = VkPipelineComputeCreate(RenderState->Device, &RenderState->PipelineManager, &DemoState->TempArena,
+                                                                       "shader_graph_gen_edges.spv", "main", Layouts, ArrayCount(Layouts));
+        }
+    }
+    
     // NOTE: Create render data
     {
         u32 Width = RenderState->WindowWidth;
@@ -214,7 +228,7 @@ DEMO_INIT(Init)
 
             VkDescriptorSetLayout DescriptorLayouts[] =
                 {
-                    DemoState->Scene.SceneDescLayout,
+                    DemoState->GraphDescLayout,
                 };
             
             DemoState->CirclePipeline = VkPipelineBuilderEnd(&Builder, RenderState->Device, &RenderState->PipelineManager,
@@ -233,6 +247,9 @@ DEMO_INIT(Init)
             // NOTE: Specify input vertex data format
             VkPipelineVertexBindingBegin(&Builder);
             VkPipelineVertexAttributeAdd(&Builder, VK_FORMAT_R32G32_SFLOAT, sizeof(v2));
+            VkPipelineVertexBindingEnd(&Builder);
+
+            VkPipelineVertexBindingBegin(&Builder);
             VkPipelineVertexAttributeAdd(&Builder, VK_FORMAT_R32G32B32A32_SFLOAT, sizeof(v4));
             VkPipelineVertexBindingEnd(&Builder);
 
@@ -246,160 +263,12 @@ DEMO_INIT(Init)
 
             VkDescriptorSetLayout DescriptorLayouts[] =
                 {
-                    DemoState->Scene.SceneDescLayout,
+                    DemoState->GraphDescLayout,
                 };
             
             DemoState->LinePipeline = VkPipelineBuilderEnd(&Builder, RenderState->Device, &RenderState->PipelineManager,
                                                            DemoState->RenderTarget.RenderPass, 0, DescriptorLayouts,
                                                            ArrayCount(DescriptorLayouts));
-        }
-    }
-
-    // NOTE: Init graph nodes
-    {
-        // NOTE: Setup default layout params
-#if 0
-        DemoState->LayoutAvoidDiffRadius = 0.5f;
-        DemoState->LayoutAvoidDiffAccel = 1.0f;
-        DemoState->LayoutAvoidSameRadius = 0;
-        DemoState->LayoutAvoidSameAccel = 0;
-        DemoState->LayoutPullSameRadius = 0;
-        DemoState->LayoutPullSameAccel = 0;
-        DemoState->LayoutEdgeMinDist = 0.3f;
-        DemoState->LayoutEdgeAccel = 1.0f;
-#endif
-        DemoState->LayoutAvoidDiffRadius = 1.79f;
-        DemoState->LayoutAvoidDiffAccel = 1.82f;
-        DemoState->LayoutAvoidSameRadius = 0.35f;
-        DemoState->LayoutAvoidSameAccel = 0.82f;
-        DemoState->LayoutPullSameRadius = 1.117f;
-        DemoState->LayoutPullSameAccel = 0.1f;
-        DemoState->LayoutEdgeMinDist = 0.42f;
-        DemoState->LayoutEdgeAccel = 2.12f;
-
-        DemoState->PauseSim = true;
-        
-        u32 RedNodesStart1 = 0;
-        u32 NumRedNodes1 = 8;
-        u32 RedNodesStart2 = RedNodesStart1 + NumRedNodes1;
-        u32 NumRedNodes2 = 8;
-        u32 RedNodesStart3 = RedNodesStart2 + NumRedNodes2;
-        u32 NumRedNodes3 = 8;
-
-        u32 BlackNodesStart1 = RedNodesStart3 + NumRedNodes3;
-        u32 NumBlackNodes1 = 8;
-        u32 BlackNodesStart2 = BlackNodesStart1 + NumBlackNodes1;
-        u32 NumBlackNodes2 = 8;
-        DemoState->NumGraphNodes = NumRedNodes1 + NumRedNodes2 + NumRedNodes3 + NumBlackNodes1 + NumBlackNodes2;
-        DemoState->GraphNodes = PushArray(&DemoState->Arena, graph_node, DemoState->NumGraphNodes);
-        DemoState->MaxNumGraphEdges = Square(DemoState->NumGraphNodes);
-        DemoState->GraphEdges = PushArray(&DemoState->Arena, u32, DemoState->MaxNumGraphEdges);
-
-        // NOTE: Create Nodes
-        {
-            for (u32 RedNodeId = RedNodesStart1; RedNodeId < RedNodesStart1 + NumRedNodes1; ++RedNodeId)
-            {
-                graph_node* CurrNode = DemoState->GraphNodes + RedNodeId;
-                *CurrNode = {};
-                CurrNode->Pos = V2(0, 0); //V2(f32(RedNodeId), 0.0f);
-                CurrNode->Scale = 0.2f;
-                CurrNode->Color = V3(1, 0, 0);
-                CurrNode->FamilyId = 0;
-            }
-
-            for (u32 RedNodeId = RedNodesStart2; RedNodeId < RedNodesStart2 + NumRedNodes2; ++RedNodeId)
-            {
-                graph_node* CurrNode = DemoState->GraphNodes + RedNodeId;
-                *CurrNode = {};
-                CurrNode->Pos = V2(0, 0); //V2(f32(RedNodeId), 0.0f);
-                CurrNode->Scale = 0.2f;
-                CurrNode->Color = V3(1, 0, 0);
-                CurrNode->FamilyId = 0;
-            }
-
-            for (u32 RedNodeId = RedNodesStart3; RedNodeId < RedNodesStart3 + NumRedNodes3; ++RedNodeId)
-            {
-                graph_node* CurrNode = DemoState->GraphNodes + RedNodeId;
-                *CurrNode = {};
-                CurrNode->Pos = V2(0, 0); //V2(f32(RedNodeId), 0.0f);
-                CurrNode->Scale = 0.2f;
-                CurrNode->Color = V3(1, 0, 0);
-                CurrNode->FamilyId = 0;
-            }
-
-            for (u32 BlackNodeId = BlackNodesStart1; BlackNodeId < BlackNodesStart1 + NumBlackNodes1; ++BlackNodeId)
-            {
-                graph_node* CurrNode = DemoState->GraphNodes + BlackNodeId;
-                *CurrNode = {};
-                CurrNode->Pos = V2(0, 0); //V2(f32(BlackNodeId), 1.0f);
-                CurrNode->Scale = 0.2f;
-                CurrNode->Color = V3(0, 0, 0);
-                CurrNode->FamilyId = 1;
-            }
-
-            for (u32 BlackNodeId = BlackNodesStart2; BlackNodeId < BlackNodesStart2 + NumBlackNodes2; ++BlackNodeId)
-            {
-                graph_node* CurrNode = DemoState->GraphNodes + BlackNodeId;
-                *CurrNode = {};
-                CurrNode->Pos = V2(0, 0); //V2(f32(BlackNodeId), 1.0f);
-                CurrNode->Scale = 0.2f;
-                CurrNode->Color = V3(0, 0, 0);
-                CurrNode->FamilyId = 1;
-            }
-        }
-
-        // NOTE: Create edges
-        {
-            // NOTE: Connect red group 1 to black group 1
-            for (u32 RedNodeId = RedNodesStart1; RedNodeId < RedNodesStart1 + NumRedNodes1; ++RedNodeId)
-            {
-                graph_node* RedNode = DemoState->GraphNodes + RedNodeId;
-                RedNode->StartEdges = DemoState->NumGraphEdges;
-                RedNode->EndEdges = DemoState->NumGraphEdges;
-
-                for (u32 BlackNodeId = BlackNodesStart1; BlackNodeId < BlackNodesStart1 + NumBlackNodes1; ++BlackNodeId)
-                {
-                    graph_node* BlackNode = DemoState->GraphNodes + BlackNodeId;
-
-                    Assert(DemoState->NumGraphEdges < DemoState->MaxNumGraphEdges);
-                    DemoState->GraphEdges[DemoState->NumGraphEdges++] = BlackNodeId;
-                    RedNode->EndEdges += 1;
-                }
-            }
-
-            // NOTE: Connect red group 2 to black group 2
-            for (u32 RedNodeId = RedNodesStart2; RedNodeId < RedNodesStart2 + NumRedNodes2; ++RedNodeId)
-            {
-                graph_node* RedNode = DemoState->GraphNodes + RedNodeId;
-                RedNode->StartEdges = DemoState->NumGraphEdges;
-                RedNode->EndEdges = DemoState->NumGraphEdges;
-
-                for (u32 BlackNodeId = BlackNodesStart2; BlackNodeId < BlackNodesStart2 + NumBlackNodes2; ++BlackNodeId)
-                {
-                    graph_node* BlackNode = DemoState->GraphNodes + BlackNodeId;
-
-                    Assert(DemoState->NumGraphEdges < DemoState->MaxNumGraphEdges);
-                    DemoState->GraphEdges[DemoState->NumGraphEdges++] = BlackNodeId;
-                    RedNode->EndEdges += 1;
-                }
-            }
-
-            // NOTE: Connect red group 3 to black group 1 and 2
-            for (u32 RedNodeId = RedNodesStart3; RedNodeId < RedNodesStart3 + NumRedNodes3; ++RedNodeId)
-            {
-                graph_node* RedNode = DemoState->GraphNodes + RedNodeId;
-                RedNode->StartEdges = DemoState->NumGraphEdges;
-                RedNode->EndEdges = DemoState->NumGraphEdges;
-
-                for (u32 BlackNodeId = BlackNodesStart1; BlackNodeId < BlackNodesStart1 + NumBlackNodes1 + NumBlackNodes2; ++BlackNodeId)
-                {
-                    graph_node* BlackNode = DemoState->GraphNodes + BlackNodeId;
-
-                    Assert(DemoState->NumGraphEdges < DemoState->MaxNumGraphEdges);
-                    DemoState->GraphEdges[DemoState->NumGraphEdges++] = BlackNodeId;
-                    RedNode->EndEdges += 1;
-                }
-            }
         }
     }
     
@@ -411,6 +280,261 @@ DEMO_INIT(Init)
                                 
         // NOTE: Push meshes
         Scene->CircleMeshId = SceneMeshAdd(Scene, AssetsPushQuad());
+        
+        // NOTE: Init graph nodes
+        {
+            // NOTE: Setup default layout params
+            DemoState->LayoutAvoidDiffRadius = 2.67f;
+            DemoState->LayoutAvoidDiffAccel = 1.82f;
+            DemoState->LayoutAvoidSameRadius = 0.5f;
+            DemoState->LayoutAvoidSameAccel = 8.98f;
+            DemoState->LayoutPullSameRadius = 2.411f;
+            DemoState->LayoutPullSameAccel = 0.335f;
+            DemoState->LayoutEdgeMinDist = 1.65529f;
+            DemoState->LayoutEdgeAccel = 1.472f;
+
+            DemoState->PauseSim = false;
+        
+            u32 RedNodesStart1 = 0;
+            u32 NumRedNodes1 = 800;
+            u32 RedNodesStart2 = RedNodesStart1 + NumRedNodes1;
+            u32 NumRedNodes2 = 800;
+            u32 RedNodesStart3 = RedNodesStart2 + NumRedNodes2;
+            u32 NumRedNodes3 = 800;
+
+            DemoState->NumGraphRedNodes = RedNodesStart1 + RedNodesStart2 + RedNodesStart3;
+
+            u32 BlackNodesStart1 = RedNodesStart3 + NumRedNodes3;
+            u32 NumBlackNodes1 = 100;
+            u32 BlackNodesStart2 = BlackNodesStart1 + NumBlackNodes1;
+            u32 NumBlackNodes2 = 100;
+
+            DemoState->NumGraphNodes = NumRedNodes1 + NumRedNodes2 + NumRedNodes3 + NumBlackNodes1 + NumBlackNodes2;
+            u32 MaxNumEdges = DemoState->NumGraphNodes * DemoState->NumGraphNodes;
+
+            // NOTE: Allocate buffers
+            {
+                DemoState->GraphGlobalsBuffer = VkBufferCreate(RenderState->Device, &RenderState->GpuArena,
+                                                               VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                               sizeof(graph_globals));
+                DemoState->NodePositionBuffer = VkBufferCreate(RenderState->Device, &RenderState->GpuArena,
+                                                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                               sizeof(graph_node_pos) * DemoState->NumGraphNodes);
+                DemoState->NodeVelocityBuffer = VkBufferCreate(RenderState->Device, &RenderState->GpuArena,
+                                                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                               sizeof(v2) * DemoState->NumGraphNodes);
+                DemoState->NodeEdgeBuffer = VkBufferCreate(RenderState->Device, &RenderState->GpuArena,
+                                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                           sizeof(graph_node_edges) * DemoState->NumGraphNodes);
+                DemoState->EdgeBuffer = VkBufferCreate(RenderState->Device, &RenderState->GpuArena,
+                                                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                       sizeof(u32) * MaxNumEdges);
+                DemoState->NodeDrawBuffer = VkBufferCreate(RenderState->Device, &RenderState->GpuArena,
+                                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                           sizeof(graph_node_draw) * DemoState->NumGraphNodes);
+                        
+                DemoState->GraphDescriptor = VkDescriptorSetAllocate(RenderState->Device, RenderState->DescriptorPool, DemoState->GraphDescLayout);
+                VkDescriptorBufferWrite(&RenderState->DescriptorManager, DemoState->GraphDescriptor, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, DemoState->GraphGlobalsBuffer);
+                VkDescriptorBufferWrite(&RenderState->DescriptorManager, DemoState->GraphDescriptor, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, DemoState->NodePositionBuffer);
+                VkDescriptorBufferWrite(&RenderState->DescriptorManager, DemoState->GraphDescriptor, 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, DemoState->NodeVelocityBuffer);
+                VkDescriptorBufferWrite(&RenderState->DescriptorManager, DemoState->GraphDescriptor, 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, DemoState->NodeEdgeBuffer);
+                VkDescriptorBufferWrite(&RenderState->DescriptorManager, DemoState->GraphDescriptor, 4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, DemoState->EdgeBuffer);
+                VkDescriptorBufferWrite(&RenderState->DescriptorManager, DemoState->GraphDescriptor, 5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, DemoState->NodeDrawBuffer);
+            }
+        
+            // NOTE: Get pointers to GPU memory for our graph
+            graph_node_pos* NodePosGpu = VkCommandsPushWriteArray(Commands, DemoState->NodePositionBuffer, graph_node_pos, DemoState->NumGraphNodes,
+                                                                  BarrierMask(VkAccessFlagBits(0), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT),
+                                                                  BarrierMask(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT));
+            graph_node_edges* NodeEdgeGpu = VkCommandsPushWriteArray(Commands, DemoState->NodeEdgeBuffer, graph_node_edges, DemoState->NumGraphNodes,
+                                                                     BarrierMask(VkAccessFlagBits(0), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT),
+                                                                     BarrierMask(VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT));
+            u32* EdgeGpu = VkCommandsPushWriteArray(Commands, DemoState->EdgeBuffer, u32, MaxNumEdges,
+                                                    BarrierMask(VkAccessFlagBits(0), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT),
+                                                    BarrierMask(VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT));
+            graph_node_draw* NodeDrawGpu = VkCommandsPushWriteArray(Commands, DemoState->NodeDrawBuffer, graph_node_draw, DemoState->NumGraphNodes,
+                                                                    BarrierMask(VkAccessFlagBits(0), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT),
+                                                                    BarrierMask(VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT));
+
+            // NOTE: Create Nodes
+            {
+                for (u32 RedNodeId = RedNodesStart1; RedNodeId < RedNodesStart1 + NumRedNodes1; ++RedNodeId)
+                {
+                    NodePosGpu[RedNodeId].Pos = V2(0, 0);
+                    NodePosGpu[RedNodeId].FamilyId = 0;
+
+                    NodeDrawGpu[RedNodeId].Color = V3(1, 0, 0);
+                    NodeDrawGpu[RedNodeId].Scale = 0.2f;
+                }
+
+                for (u32 RedNodeId = RedNodesStart2; RedNodeId < RedNodesStart2 + NumRedNodes2; ++RedNodeId)
+                {
+                    NodePosGpu[RedNodeId].Pos = V2(0, 0);
+                    NodePosGpu[RedNodeId].FamilyId = 0;
+
+                    NodeDrawGpu[RedNodeId].Color = V3(1, 0, 0);
+                    NodeDrawGpu[RedNodeId].Scale = 0.2f;
+                }
+
+                for (u32 RedNodeId = RedNodesStart3; RedNodeId < RedNodesStart3 + NumRedNodes3; ++RedNodeId)
+                {
+                    NodePosGpu[RedNodeId].Pos = V2(0, 0);
+                    NodePosGpu[RedNodeId].FamilyId = 0;
+
+                    NodeDrawGpu[RedNodeId].Color = V3(1, 0, 0);
+                    NodeDrawGpu[RedNodeId].Scale = 0.2f;
+                }
+
+                for (u32 BlackNodeId = BlackNodesStart1; BlackNodeId < BlackNodesStart1 + NumBlackNodes1; ++BlackNodeId)
+                {
+                    NodePosGpu[BlackNodeId].Pos = V2(0, 0);
+                    NodePosGpu[BlackNodeId].FamilyId = 1;
+
+                    NodeDrawGpu[BlackNodeId].Color = V3(0, 0, 0);
+                    NodeDrawGpu[BlackNodeId].Scale = 0.2f;
+                }
+
+                for (u32 BlackNodeId = BlackNodesStart2; BlackNodeId < BlackNodesStart2 + NumBlackNodes2; ++BlackNodeId)
+                {
+                    NodePosGpu[BlackNodeId].Pos = V2(0, 0);
+                    NodePosGpu[BlackNodeId].FamilyId = 1;
+
+                    NodeDrawGpu[BlackNodeId].Color = V3(0, 0, 0);
+                    NodeDrawGpu[BlackNodeId].Scale = 0.2f;
+                }
+            }
+
+            // NOTE: Create edges
+            {
+                {
+                    // NOTE: Connect red group 1 to black group 1
+                    for (u32 RedNodeId = RedNodesStart1; RedNodeId < RedNodesStart1 + NumRedNodes1; ++RedNodeId)
+                    {
+                        NodeEdgeGpu[RedNodeId].StartConnections = DemoState->NumGraphEdges;
+                        NodeEdgeGpu[RedNodeId].EndConnections = DemoState->NumGraphEdges;
+
+                        for (u32 BlackNodeId = BlackNodesStart1; BlackNodeId < BlackNodesStart1 + NumBlackNodes1; ++BlackNodeId)
+                        {
+                            Assert(DemoState->NumGraphEdges < MaxNumEdges);
+                            EdgeGpu[DemoState->NumGraphEdges++] = BlackNodeId;
+                            NodeEdgeGpu[RedNodeId].EndConnections += 1;
+                        }
+                    }
+
+                    // NOTE: Connect red group 2 to black group 2
+                    for (u32 RedNodeId = RedNodesStart2; RedNodeId < RedNodesStart2 + NumRedNodes2; ++RedNodeId)
+                    {
+                        NodeEdgeGpu[RedNodeId].StartConnections = DemoState->NumGraphEdges;
+                        NodeEdgeGpu[RedNodeId].EndConnections = DemoState->NumGraphEdges;
+
+                        for (u32 BlackNodeId = BlackNodesStart2; BlackNodeId < BlackNodesStart2 + NumBlackNodes2; ++BlackNodeId)
+                        {
+                            Assert(DemoState->NumGraphEdges < MaxNumEdges);
+                            EdgeGpu[DemoState->NumGraphEdges++] = BlackNodeId;
+                            NodeEdgeGpu[RedNodeId].EndConnections += 1;
+                        }
+                    }
+
+                    // NOTE: Connect red group 3 to black group 1 and 2
+                    for (u32 RedNodeId = RedNodesStart3; RedNodeId < RedNodesStart3 + NumRedNodes3; ++RedNodeId)
+                    {
+                        NodeEdgeGpu[RedNodeId].StartConnections = DemoState->NumGraphEdges;
+                        NodeEdgeGpu[RedNodeId].EndConnections = DemoState->NumGraphEdges;
+
+                        for (u32 BlackNodeId = BlackNodesStart1; BlackNodeId < BlackNodesStart1 + NumBlackNodes1 + NumBlackNodes2; ++BlackNodeId)
+                        {
+                            Assert(DemoState->NumGraphEdges < MaxNumEdges);
+                            EdgeGpu[DemoState->NumGraphEdges++] = BlackNodeId;
+                            NodeEdgeGpu[RedNodeId].EndConnections += 1;
+                        }
+                    }
+                }
+
+                // NOTE: Save on memory since nodes are double represented for sim
+                {
+                    DemoState->NumGraphDrawEdges = DemoState->NumGraphEdges;
+                    DemoState->EdgePositionBuffer = VkBufferCreate(RenderState->Device, &RenderState->GpuArena,
+                                                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                                   sizeof(v2) * 2 * DemoState->NumGraphDrawEdges);
+                    DemoState->EdgeColorBuffer = VkBufferCreate(RenderState->Device, &RenderState->GpuArena,
+                                                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                                sizeof(v4) * 2 * DemoState->NumGraphDrawEdges);
+                    VkDescriptorBufferWrite(&RenderState->DescriptorManager, DemoState->GraphDescriptor, 6, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, DemoState->EdgePositionBuffer);
+                    VkDescriptorBufferWrite(&RenderState->DescriptorManager, DemoState->GraphDescriptor, 7, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, DemoState->EdgeColorBuffer);
+                }
+
+                // NOTE: Mirror the connections for black nodes now since GPUs don't support atomic float adds
+                {
+                    // NOTE: Connect black group 1 to red group 1 and 3
+                    for (u32 BlackNodeId = BlackNodesStart1; BlackNodeId < BlackNodesStart1 + NumBlackNodes1; ++BlackNodeId)
+                    {
+                        NodeEdgeGpu[BlackNodeId].StartConnections = DemoState->NumGraphEdges;
+                        NodeEdgeGpu[BlackNodeId].EndConnections = DemoState->NumGraphEdges;
+
+                        for (u32 RedNodeId = RedNodesStart1; RedNodeId < RedNodesStart1 + NumRedNodes1; ++RedNodeId)
+                        {
+                            Assert(DemoState->NumGraphEdges < MaxNumEdges);
+                            EdgeGpu[DemoState->NumGraphEdges++] = RedNodeId;
+                            NodeEdgeGpu[BlackNodeId].EndConnections += 1;
+                        }
+
+                        for (u32 RedNodeId = RedNodesStart3; RedNodeId < RedNodesStart3 + NumRedNodes3; ++RedNodeId)
+                        {
+                            Assert(DemoState->NumGraphEdges < MaxNumEdges);
+                            EdgeGpu[DemoState->NumGraphEdges++] = RedNodeId;
+                            NodeEdgeGpu[BlackNodeId].EndConnections += 1;
+                        }
+                    }
+
+                    // NOTE: Connect black group 2 to red group 2 and 3
+                    for (u32 BlackNodeId = BlackNodesStart2; BlackNodeId < BlackNodesStart2 + NumBlackNodes2; ++BlackNodeId)
+                    {
+                        NodeEdgeGpu[BlackNodeId].StartConnections = DemoState->NumGraphEdges;
+                        NodeEdgeGpu[BlackNodeId].EndConnections = DemoState->NumGraphEdges;
+
+                        for (u32 RedNodeId = RedNodesStart2; RedNodeId < RedNodesStart2 + NumRedNodes2; ++RedNodeId)
+                        {
+                            Assert(DemoState->NumGraphEdges < MaxNumEdges);
+                            EdgeGpu[DemoState->NumGraphEdges++] = RedNodeId;
+                            NodeEdgeGpu[BlackNodeId].EndConnections += 1;
+                        }
+
+                        for (u32 RedNodeId = RedNodesStart3; RedNodeId < RedNodesStart3 + NumRedNodes3; ++RedNodeId)
+                        {
+                            Assert(DemoState->NumGraphEdges < MaxNumEdges);
+                            EdgeGpu[DemoState->NumGraphEdges++] = RedNodeId;
+                            NodeEdgeGpu[BlackNodeId].EndConnections += 1;
+                        }
+                    }
+                }
+            
+                // NOTE: Populate graph edges
+                v2* EdgePosGpu = VkCommandsPushWriteArray(Commands, DemoState->EdgePositionBuffer, v2, 2*DemoState->NumGraphDrawEdges,
+                                                          BarrierMask(VkAccessFlagBits(0), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT),
+                                                          BarrierMask(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT));
+                v4* EdgeColorGpu = VkCommandsPushWriteArray(Commands, DemoState->EdgeColorBuffer, v4, 2*DemoState->NumGraphDrawEdges,
+                                                            BarrierMask(VkAccessFlagBits(0), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT),
+                                                            BarrierMask(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT));
+
+                for (u32 CurrNodeId = 0; CurrNodeId < BlackNodesStart1; ++CurrNodeId)
+                {
+                    graph_node_pos CurrNodePos = NodePosGpu[CurrNodeId];
+                    graph_node_edges CurrNodeEdges = NodeEdgeGpu[CurrNodeId];
+
+                    for (u32 EdgeId = CurrNodeEdges.StartConnections; EdgeId < CurrNodeEdges.EndConnections; ++EdgeId)
+                    {
+                        u32 OtherNodeId = EdgeGpu[EdgeId];
+                        graph_node_pos OtherNodePos = NodePosGpu[OtherNodeId];
+
+                        EdgePosGpu[2*EdgeId + 0] = CurrNodePos.Pos;
+                        EdgePosGpu[2*EdgeId + 1] = OtherNodePos.Pos;
+
+                        EdgeColorGpu[2*EdgeId + 0] = V4(0, 0, 1, 1);
+                        EdgeColorGpu[2*EdgeId + 1] = V4(0, 0, 1, 1);
+                    }
+                }
+            }
+        }
         
         UiStateCreate(RenderState->Device, &DemoState->Arena, &DemoState->TempArena, RenderState->LocalMemoryId,
                       &RenderState->DescriptorManager, &RenderState->PipelineManager, &RenderState->Commands,
@@ -549,158 +673,94 @@ DEMO_MAIN_LOOP(MainLoop)
 
             UiStateEnd(UiState, &RenderState->DescriptorManager);
         }
-
-        // NOTE: Simluate graph layout
-        if (!DemoState->PauseSim)
-        {
-            // NOTE: Move connected nodes closer to each other
-            for (u32 CurrNodeId = 0; CurrNodeId < DemoState->NumGraphNodes; ++CurrNodeId)
-            {
-                graph_node* CurrNode = DemoState->GraphNodes + CurrNodeId;
-
-                for (u32 EdgeId = CurrNode->StartEdges; EdgeId < CurrNode->EndEdges; ++EdgeId)
-                {
-                    u32 OtherNodeId = DemoState->GraphEdges[EdgeId];
-                    graph_node* OtherNode = DemoState->GraphNodes + OtherNodeId;
-
-                    f32 DistanceSq = LengthSquared(CurrNode->Pos - OtherNode->Pos);
-                    if (DistanceSq > Square(DemoState->LayoutEdgeMinDist))
-                    {
-                        v2 Accel = DemoState->LayoutEdgeAccel * Normalize(CurrNode->Pos - OtherNode->Pos);
-                        CurrNode->Accel -= Accel;
-                        OtherNode->Accel += Accel;
-                    }
-                }
-            }
-
-            // NOTE: Move nodes away if they are too close to eachother or pull together
-            for (u32 CurrNodeId = 0; CurrNodeId < DemoState->NumGraphNodes; ++CurrNodeId)
-            {
-                graph_node* CurrNode = DemoState->GraphNodes + CurrNodeId;
-                for (u32 OtherNodeId = 0; OtherNodeId < DemoState->NumGraphNodes; ++OtherNodeId)
-                {
-                    graph_node* OtherNode = DemoState->GraphNodes + OtherNodeId;
-
-                    if (CurrNodeId != OtherNodeId)
-                    {
-                        b32 SameFamily = CurrNode->FamilyId == OtherNode->FamilyId;
-                        f32 AvoidRadius = SameFamily ? DemoState->LayoutAvoidSameRadius : DemoState->LayoutAvoidDiffRadius;
-                        f32 AvoidAccel = SameFamily ? DemoState->LayoutAvoidSameAccel : DemoState->LayoutAvoidDiffAccel;
-                        
-                        f32 DistanceSq = LengthSquared(CurrNode->Pos - OtherNode->Pos);
-                        if (DistanceSq < Square(AvoidRadius))
-                        {
-                            f32 T = DistanceSq / AvoidRadius;
-                            f32 AvoidAccelMag = Lerp(AvoidAccel, 0.0f, T);
-
-                            v2 Dir = {};
-                            if (DistanceSq == 0.0f)
-                            {
-                                Dir = Normalize(V2(RandFloat(), RandFloat()));
-                            }
-                            else
-                            {
-                                Dir = Normalize(CurrNode->Pos - OtherNode->Pos);
-                            }
-
-                            CurrNode->Accel += Dir * AvoidAccelMag;
-                            OtherNode->Accel -= Dir * AvoidAccelMag;
-                        }
-                        else if (SameFamily && DistanceSq < Square(DemoState->LayoutPullSameRadius))
-                        {
-                            v2 Accel = DemoState->LayoutPullSameAccel * Normalize(CurrNode->Pos - OtherNode->Pos);
-                            
-                            CurrNode->Accel -= Accel;
-                            OtherNode->Accel += Accel;
-                        }
-                    }
-                }
-            }
-
-            // NOTE: Update node positions
-            for (u32 CurrNodeId = 0; CurrNodeId < DemoState->NumGraphNodes; ++CurrNodeId)
-            {
-                graph_node* CurrNode = DemoState->GraphNodes + CurrNodeId;
-                
-                CurrNode->Vel += CurrNode->Accel * ModifiedFrameTime;
-                CurrNode->Pos += CurrNode->Vel * ModifiedFrameTime;
-
-                // NOTE: Reset so that accel doesn't blow up to infinity
-                CurrNode->Accel = {};
-                CurrNode->Vel = {};
-            }
-        }
-
+        
         // NOTE: Upload scene data
         {
             render_scene* Scene = &DemoState->Scene;
-            Scene->NumCircles = 0;
-            Scene->NumLines = 0;
             if (!(DemoState->UiState.MouseTouchingUi || DemoState->UiState.ProcessedInteraction))
             {
                 CameraUpdate(&Scene->Camera, CurrInput, PrevInput, FrameTime);
-            }
-            
-            // NOTE: Populate scene
-            {
-                CPU_TIMED_BLOCK("Gen Render Instances");
-
-                // NOTE: Populate graph nodes
-                for (u32 NodeId = 0; NodeId < DemoState->NumGraphNodes; ++NodeId)
-                {
-                    graph_node* CurrNode = DemoState->GraphNodes + NodeId;
-                    SceneCircleInstanceAdd(Scene, CurrNode->Pos, CurrNode->Scale, V4(CurrNode->Color, 1));
-                }
-
-                // NOTE: Populate graph edges
-                for (u32 CurrNodeId = 0; CurrNodeId < DemoState->NumGraphNodes; ++CurrNodeId)
-                {
-                    graph_node* CurrNode = DemoState->GraphNodes + CurrNodeId;
-
-                    for (u32 EdgeId = CurrNode->StartEdges; EdgeId < CurrNode->EndEdges; ++EdgeId)
-                    {
-                        u32 OtherNodeId = DemoState->GraphEdges[EdgeId];
-                        graph_node* OtherNode = DemoState->GraphNodes + OtherNodeId;
-                        
-                        SceneLineInstanceAdd(Scene, CurrNode->Pos, OtherNode->Pos, V4(0, 0, 1, 1));
-                    }
-                }
             }
 
             // NOTE: Populate GPU Buffers
             {
                 {
                     CPU_TIMED_BLOCK("Upload scene buffer to  GPU");
-                    scene_buffer* GpuData = VkCommandsPushWriteStruct(Commands, Scene->SceneBuffer, scene_buffer,
+                    graph_globals* GpuData = VkCommandsPushWriteStruct(Commands, DemoState->GraphGlobalsBuffer, graph_globals,
                                                                       BarrierMask(VkAccessFlagBits(0), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT),
                                                                       BarrierMask(VK_ACCESS_UNIFORM_READ_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT));
 
                     GpuData->VPTransform = CameraGetVP(&Scene->Camera);
                     GpuData->ViewPort = V2(RenderState->WindowWidth, RenderState->WindowHeight);
-                }
-
-                if (Scene->NumCircles > 0)
-                {
-                    CPU_TIMED_BLOCK("Upload circles to GPU");
-                    circle_entry* GpuData = VkCommandsPushWriteArray(Commands, Scene->CircleEntryBuffer, circle_entry, Scene->NumCircles,
-                                                                     BarrierMask(VkAccessFlagBits(0), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT),
-                                                                     BarrierMask(VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT));
-                    Copy(Scene->CircleEntries, GpuData, sizeof(circle_entry) * Scene->NumCircles);
-                }
-
-                if (Scene->NumLines > 0)
-                {
-                    CPU_TIMED_BLOCK("Upload line vertex buffer to GPU");
-                    line_vertex* GpuData = VkCommandsPushWriteArray(Commands, Scene->LineVertexBuffer, line_vertex, 2*Scene->NumLines,
-                                                                    BarrierMask(VkAccessFlagBits(0), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT),
-                                                                    BarrierMask(VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT));
-                    Copy(Scene->LinePoints, GpuData, sizeof(line_vertex) * 2 * Scene->NumLines);
+                    GpuData->FrameTime = ModifiedFrameTime * (!DemoState->PauseSim);
+                    GpuData->NumNodes = DemoState->NumGraphNodes;
+                    
+                    GpuData->LayoutAvoidDiffRadius = DemoState->LayoutAvoidDiffRadius;
+                    GpuData->LayoutAvoidDiffAccel = DemoState->LayoutAvoidDiffAccel;
+                    GpuData->LayoutAvoidSameRadius = DemoState->LayoutAvoidSameRadius;
+                    GpuData->LayoutAvoidSameAccel = DemoState->LayoutAvoidSameAccel;
+                    GpuData->LayoutPullSameRadius = DemoState->LayoutPullSameRadius;
+                    GpuData->LayoutPullSameAccel = DemoState->LayoutPullSameAccel;
+                    GpuData->LayoutEdgeAccel = DemoState->LayoutEdgeAccel;
+                    GpuData->LayoutEdgeMinDist = DemoState->LayoutEdgeMinDist;
                 }
             }
             
             VkCommandsTransferFlush(Commands, RenderState->Device);
         }
 
+        // NOTE: Simulate graph layout
+        {
+            VkDescriptorSet DescriptorSets[] =
+                {
+                    DemoState->GraphDescriptor,
+                };
+            u32 DispatchX = CeilU32(f32(DemoState->NumGraphNodes) / 32.0f);
+
+            VkBarrierBufferAdd(Commands, DemoState->NodeVelocityBuffer,
+                               VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                               VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+            VkCommandsBarrierFlush(Commands);
+
+            // NOTE: Graph Move Connections
+            VkComputeDispatch(Commands, DemoState->GraphMoveConnectionsPipeline, DescriptorSets, ArrayCount(DescriptorSets), DispatchX, 1, 1);
+
+            VkBarrierBufferAdd(Commands, DemoState->NodeVelocityBuffer,
+                               VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                               VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+            VkCommandsBarrierFlush(Commands);
+
+            // NOTE: Graph Nearby
+            VkComputeDispatch(Commands, DemoState->GraphNearbyPipeline, DescriptorSets, ArrayCount(DescriptorSets), DispatchX, 1, 1);
+
+            VkBarrierBufferAdd(Commands, DemoState->NodeVelocityBuffer,
+                               VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                               VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+            VkCommandsBarrierFlush(Commands);
+
+            // NOTE: Graph Update Nodes
+            VkComputeDispatch(Commands, DemoState->GraphUpdateNodesPipeline, DescriptorSets, ArrayCount(DescriptorSets), DispatchX, 1, 1);
+
+            VkBarrierBufferAdd(Commands, DemoState->NodePositionBuffer,
+                               VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                               VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+            VkCommandsBarrierFlush(Commands);
+
+            // NOTE: Graph Gen Edges
+            {
+                u32 GraphGenDispatchX = CeilU32(f32(DemoState->NumGraphRedNodes) / 32.0f);
+                VkComputeDispatch(Commands, DemoState->GraphGenEdgesPipeline, DescriptorSets, ArrayCount(DescriptorSets), GraphGenDispatchX, 1, 1);
+            }
+            
+            VkBarrierBufferAdd(Commands, DemoState->EdgePositionBuffer,
+                               VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                               VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+            VkBarrierBufferAdd(Commands, DemoState->EdgeColorBuffer,
+                               VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                               VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+            VkCommandsBarrierFlush(Commands);
+        }
+        
         // NOTE: Render Scene
         render_scene* Scene = &DemoState->Scene;
         RenderTargetPassBegin(&DemoState->RenderTarget, Commands, RenderTargetRenderPass_SetViewPort | RenderTargetRenderPass_SetScissor);
@@ -711,17 +771,19 @@ DEMO_MAIN_LOOP(MainLoop)
             {
                 VkDescriptorSet DescriptorSets[] =
                     {
-                        Scene->SceneDescriptor,
+                        DemoState->GraphDescriptor,
                     };
                 vkCmdBindDescriptorSets(Commands->Buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, DemoState->LinePipeline->Layout, 0,
                                         ArrayCount(DescriptorSets), DescriptorSets, 0, 0);
             }
 
             VkDeviceSize Offset = 0;
-            vkCmdBindVertexBuffers(Commands->Buffer, 0, 1, &Scene->LineVertexBuffer, &Offset);
+            vkCmdBindVertexBuffers(Commands->Buffer, 0, 1, &DemoState->EdgePositionBuffer, &Offset);
+            vkCmdBindVertexBuffers(Commands->Buffer, 1, 1, &DemoState->EdgeColorBuffer, &Offset);
 
-            vkCmdDraw(Commands->Buffer, 2*Scene->NumLines, 1, 0, 0);
+            vkCmdDraw(Commands->Buffer, 2*DemoState->NumGraphDrawEdges, 1, 0, 0);
         }
+        
         {
             CPU_TIMED_BLOCK("Render Circle Nodes");
         
@@ -729,7 +791,7 @@ DEMO_MAIN_LOOP(MainLoop)
             {
                 VkDescriptorSet DescriptorSets[] =
                     {
-                        Scene->SceneDescriptor,
+                        DemoState->GraphDescriptor,
                     };
                 vkCmdBindDescriptorSets(Commands->Buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, DemoState->CirclePipeline->Layout, 0,
                                         ArrayCount(DescriptorSets), DescriptorSets, 0, 0);
@@ -739,7 +801,7 @@ DEMO_MAIN_LOOP(MainLoop)
             VkDeviceSize Offset = 0;
             vkCmdBindVertexBuffers(Commands->Buffer, 0, 1, &CurrMesh->VertexBuffer, &Offset);
             vkCmdBindIndexBuffer(Commands->Buffer, CurrMesh->IndexBuffer, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(Commands->Buffer, CurrMesh->NumIndices, Scene->NumCircles, 0, 0, 0);
+            vkCmdDrawIndexed(Commands->Buffer, CurrMesh->NumIndices, DemoState->NumGraphNodes, 0, 0, 0);
         }
         
         RenderTargetPassEnd(Commands);        
