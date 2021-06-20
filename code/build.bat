@@ -36,6 +36,8 @@ REM USING HLSL IN VK USING DXC
 REM set DxcDir=C:\Tools\DirectXShaderCompiler\build\Debug\bin
 REM %DxcDir%\dxc.exe -spirv -T cs_6_0 -E main -fspv-target-env=vulkan1.1 -Fo ..\data\write_cs.o -Fh ..\data\write_cs.o.txt ..\code\bw_write_shader.cpp
 
+call cl %CommonCompilerFlags% -Fepreprocess.exe %CodeDir%\preprocess.cpp -Fmpreprocess.map /link %CommonLinkerFlags%
+
 REM 64-bit build
 echo WAITING FOR PDB > lock.tmp
 cl %CommonCompilerFlags% %CodeDir%\huge_graphs_demo.cpp -Fmhuge_graphs_demo.map -LD /link %CommonLinkerFlags% -incremental:no -opt:ref -PDB:huge_graphs_demo_%random%.pdb -EXPORT:Init -EXPORT:Destroy -EXPORT:SwapChainChange -EXPORT:CodeReload -EXPORT:MainLoop
