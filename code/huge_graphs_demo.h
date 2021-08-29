@@ -10,15 +10,16 @@
 //#define X86_PROFILING
 #include "profiling\profiling.h"
 
+#include "file_headers.h"
+
 //
 // NOTE: Graph Data
 //
 
-struct graph_node_pos
+struct graph_edge
 {
-    v2 Pos;
-    u32 FamilyId;
-    u32 Pad;
+    u32 OtherNodeId;
+    f32 Weight;
 };
 
 struct graph_node_edges
@@ -31,6 +32,86 @@ struct graph_node_draw
 {
     v3 Color;
     f32 Scale;
+};
+
+struct grid_cell_block
+{
+    uint NextBlockOffset;
+    uint NumElements;
+    uint ElementIds[1024];
+};
+
+struct global_move
+{
+    f32 SpeedEfficiency;
+    f32 Speed;
+    f32 JitterToleranceConstant;
+    f32 MaxJitterTolerance;
+};
+
+struct global_move_counters
+{
+    u32 GlobalMoveWorkCounter;
+    u32 GlobalMoveDoneCounter;
+};
+
+//
+// NOTE: Merge Sort Data
+//
+
+struct merge_sort_uniform_data
+{
+    u32 ArraySize;
+    u32 FlipSize;
+    u32 PassId;
+    u32 N;
+    u32 StartIndexOffset;
+};
+
+struct merge_sort_descriptor
+{
+    VkBuffer UniformBuffer;
+    VkDescriptorSet Descriptor;
+};
+
+struct merge_sort_atomic_uniform_data
+{
+    u32 ArraySize;
+};
+
+struct merge_sort_atomic_buffer_data
+{
+    u32 WorkCountId;
+    u32 DoneCounterId;
+};
+
+#define MergeSortPassType_None 0
+#define MergeSortPassType_LocalFd 1
+#define MergeSortPassType_GlobalFlip 2
+#define MergeSortPassType_LocalDisperse 3
+#define MergeSortPassType_GlobalDisperse 4
+
+struct merge_sort_atomic_pass_params
+{
+    u32 PassType;
+    u32 FlipSize;
+    u32 PassId;
+    u32 N;
+};
+
+//
+// NOTE: Radix Tree Data
+//
+
+struct gpu_bounds
+{
+    v2 Min;
+    v2 Max;
+};
+
+struct radix_tree_uniform_data
+{
+    u32 NumNodes;
 };
 
 //
@@ -59,14 +140,21 @@ struct graph_globals
     u32 NumNodes;
 
     // NOTE: Layout Data
-    f32 LayoutAvoidDiffRadius;
-    f32 LayoutAvoidDiffAccel;
-    f32 LayoutAvoidSameRadius;
-    f32 LayoutAvoidSameAccel;
-    f32 LayoutPullSameRadius;
-    f32 LayoutPullSameAccel;
-    f32 LayoutEdgeAccel;
-    f32 LayoutEdgeMinDist;
+    float AttractionMultiplier;
+    float AttractionWeightPower;
+    float RepulsionMultiplier;
+    float RepulsionSoftner;
+    float GravityMultiplier;
+    b32 StrongGravityEnabled;
+    
+    // NOTE: Grid Data
+    f32 CellDim;
+    f32 WorldRadius;
+    u32 NumCellsDim;
+
+    // NOTE: Reduction data
+    u32 NumThreadGroupsCalcNodeBounds;
+    u32 NumThreadGroupsGlobalSpeed;
 };
 
 struct render_mesh
@@ -86,7 +174,12 @@ struct render_scene
     u32 NumRenderMeshes;
     render_mesh* RenderMeshes;
     u32 CircleMeshId;
+    u32 QuadMeshId;
 };
+
+#define MAX_THREAD_GROUPS 65535
+#define BITONIC_MERGE_SORT 0
+#define LINE_PIPELINE_2 0
 
 struct demo_state
 {
@@ -110,14 +203,12 @@ struct demo_state
     ui_state UiState;
 
     // NOTE: Layout Data
-    f32 LayoutAvoidDiffRadius;
-    f32 LayoutAvoidDiffAccel;
-    f32 LayoutAvoidSameRadius;
-    f32 LayoutAvoidSameAccel;
-    f32 LayoutPullSameRadius;
-    f32 LayoutPullSameAccel;
-    f32 LayoutEdgeAccel;
-    f32 LayoutEdgeMinDist;
+    float AttractionMultiplier;
+    float AttractionWeightPower;
+    float RepulsionMultiplier;
+    float RepulsionSoftner;
+    float GravityMultiplier;
+    b32 StrongGravityEnabled;
     
     // NOTE: Graph Sim
     b32 PauseSim;
@@ -125,23 +216,105 @@ struct demo_state
     u32 NumGraphRedNodes;
     u32 NumGraphEdges;
     u32 NumGraphDrawEdges;
+    u32 NumCellsAxis;
+    f32 CellWorldDim;
+    f32 WorldRadius;
+
+    //======================================================================
+    // NOTE: Graph GPU Data
+    //======================================================================
     
     VkDescriptorSetLayout GraphDescLayout;
     VkDescriptorSet GraphDescriptor;
     VkBuffer GraphGlobalsBuffer;
-    VkBuffer NodePositionBuffer;
-    VkBuffer NodeVelocityBuffer;
+    VkBuffer NodePosBuffer;
+    VkBuffer NodeDegreeBuffer;
+    VkBuffer NodeCellIdBuffer;
+    VkBuffer NodeForceBuffer;
+    VkBuffer NodePrevForceBuffer;
     VkBuffer NodeEdgeBuffer;
     VkBuffer EdgeBuffer;
+
+    VkBuffer GlobalMoveBuffer;
+    VkBuffer GlobalMoveReductionBuffer;
+    VkBuffer GlobalMoveCounterBuffer;
         
     vk_pipeline* GraphMoveConnectionsPipeline;
-    vk_pipeline* GraphNearbyPipeline;
+    vk_pipeline* GraphCalcGlobalSpeedPipeline;
     vk_pipeline* GraphUpdateNodesPipeline;
-    vk_pipeline* GraphGenEdgesPipeline;
+
+    // NOTE: Regular n^2 repulsion
+    vk_pipeline* GraphRepulsionPipeline;
+
+    //======================================================================
+    // NOTE: Radix Repulsion GPU Data
+    //======================================================================
+
+    VkBuffer GlobalBoundsReductionBuffer;
+    VkBuffer GlobalBoundsCounterBuffer;
+    VkBuffer ElementBoundsBuffer;
     
-    // NOTE: Graph Draw
+    vk_pipeline* CalcWorldBoundsPipeline;
+    
+    // NOTE: Radix Tree Data
+    VkBuffer RadixTreeUniformBuffer;
+    VkBuffer RadixMortonKeyBuffer;
+    VkBuffer RadixElementReMappingBuffer;
+    VkBuffer RadixTreeChildrenBuffer;
+    VkBuffer RadixTreeParentBuffer;
+    VkBuffer RadixTreeParticleBuffer;
+    VkBuffer RadixTreeAtomicsBuffer;
+    VkDescriptorSet RadixTreeDescriptor;
+    VkDescriptorSetLayout RadixTreeDescLayout;
+
+    vk_pipeline* GenerateMortonKeysPipeline;
+    vk_pipeline* RadixTreeBuildPipeline;
+    vk_pipeline* RadixTreeSummarizePipeline;
+    vk_pipeline* RadixTreeRepulsionPipeline;
+    
+    // NOTE: Merge Sort Data
+    VkDescriptorSetLayout MergeSortDescLayout;
+    merge_sort_descriptor MergeSortLocalFdDescriptor;
+    merge_sort_descriptor MergeSortLocalDisperseDescriptor;
+    merge_sort_descriptor MergeSortGlobalFlipDescriptors[10];
+    merge_sort_descriptor MergeSortGlobalDisperseDescriptors[10];
+
+    vk_pipeline* MergeSortLocalFdPipeline;
+    vk_pipeline* MergeSortGlobalFlipPipeline;
+    vk_pipeline* MergeSortLocalDispersePipeline;
+    vk_pipeline* MergeSortGlobalDispersePipeline;
+
+    // NOTE: Parallel Sort Data
+#define PARALLEL_SORT_MAX_THREAD_GROUPS 1000000
+    u32 ParallelSortNumThreadGroups;
+    u32 ParallelSortNumReducedThreadGroups;
+
+    VkDescriptorSet ParallelSortConstantDescriptor;
+    VkDescriptorSet ParallelSortInputOutputDescriptor[2];
+    VkDescriptorSet ParallelSortScanDescriptor[2];
+    VkDescriptorSet ParallelSortScratchDescriptor;
+    VkBuffer ParallelSortUniformBuffer;
+    VkBuffer ParallelSortMortonBuffer;
+    VkBuffer ParallelSortPayloadBuffer;
+    VkBuffer ParallelSortScratchBuffer;
+    VkBuffer ParallelSortReducedScratchBuffer;
+
+    VkDescriptorSetLayout ParallelSortConstantDescLayout;
+    VkDescriptorSetLayout ParallelSortInputOutputDescLayout;
+    VkDescriptorSetLayout ParallelSortScanDescLayout;
+    VkDescriptorSetLayout ParallelSortScratchDescLayout;
+    vk_pipeline* ParallelSortCountPipeline;
+    vk_pipeline* ParallelSortReducePipeline;
+    vk_pipeline* ParallelSortScanPipeline;
+    vk_pipeline* ParallelSortScanAddPipeline;
+    vk_pipeline* ParallelSortScatterPipeline;
+    
+    //======================================================================
+    // NOTE: Graph Draw Data
+    //======================================================================
+    
     VkBuffer NodeDrawBuffer;
-    VkBuffer EdgePositionBuffer;
+    VkBuffer EdgeIndexBuffer;
     VkBuffer EdgeColorBuffer;
 
     vk_pipeline* CirclePipeline;

@@ -1,81 +1,34 @@
 #pragma once
 
-//
-// NOTE: File Structs
-//
-
-#pragma pack(push, 1)
-
-union file_ptr_union
+struct file_arena
 {
-    u64 Offset;
-    void* Ptr;
-    char* CharPtr;
+    u64 Start;
+    u64 Size;
+    u64 Used;
 };
 
-struct file_header
-{
-    u32 NumAccounts;
-    file_ptr_union AccountOffset;
-
-    u32 NumHashtags;
-    file_ptr_union HashtagOffset;
-
-    u32 NumEdges;
-    file_ptr_union EdgeOffset;
-
-    file_ptr_union EdgeDateOffset;
-    
-    file_ptr_union StringOffset;
-};
-
-struct file_account
-{
-    u32 YearCreated;
-    u32 NumFollowers;
-    
-    u32 NumCharsInName;
-    file_ptr_union NameOffset;
-};
-
-struct file_hashtag
-{
-    u32 NumCharsInName;
-    file_ptr_union NameOffset;
-    // NOTE: We need to know how many edges we have for allocation when visualizing
-    u32 NumEdges;
-};
-
-struct file_edge
-{
-    u32 OtherId;
-    u32 Weight;
-    u32 NumDates;
-    file_ptr_union DateOffset;
-};
-
-struct file_edge_date_info
-{
-    u16 TweetYear;
-    u8 TweetMonth;
-    u8 TweetDay;
-};
-
-#pragma pack(pop)
-
-struct preproc_edge
+struct edge
 {
     file_edge FileEdge;
-    block_arena Arena;
+    block_arena DateArena;
 };
 
-#include <unordered_map>
-
-struct account_edge_data
+struct account
 {
-    u32 NumEdges;
-    block_arena Arena;
-    std::unordered_map<u32, preproc_edge*> HashtagEdgeMapping;
+    file_account FileAccount;
+    string Name;
+    
+    block_arena EdgeArena;
+    std::unordered_map<u32, edge*> HashtagEdgeMapping;
+};
+
+struct hashtag
+{
+    file_hashtag FileHashtag;
+    string Name;
+
+    block_arena EdgeArena;
+    std::unordered_map<u32, file_edge*> AccountEdgeMapping;
 };
 
 #define MAX_NUM_ACCOUNTS 5000
@@ -85,19 +38,17 @@ struct global_state
     linear_arena FileArena;
     linear_arena Arena;
     platform_block_arena EdgeBlockArena;
-    platform_block_arena TweetBlockArena;
+    platform_block_arena DateBlockArena;
 
-    u64 NumEdges;
-    u64 StringBufferSize;
-    u64 NumEdgeDates;
     file_header FileHeader;
 
     // NOTE: Maps account name to its id in AccountEdgeData as well as the file ptr
     std::unordered_map<std::string, u32> AccountMappings;
-    account_edge_data* AccountEdgeData;
+    account* Accounts;
 
     // NOTE: Maps hashtag name to its id in file ptr
     std::unordered_map<std::string, u32> HashtagMappings;
+    hashtag* Hashtags;
 };
 
 global global_state GlobalState;

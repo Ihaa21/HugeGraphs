@@ -1,0 +1,16 @@
+https://pygraphviz.github.io/
+https://networkx.org/documentation/stable/reference/drawing.html#module-networkx.drawing.nx_pylab
+https://stratcomcoe.org/pdfjs/?file=/cuploads/pfiles/separate_article_kriel.pdf?zoom=page-fit
+https://github.com/fivethirtyeight/russian-troll-tweets
+https://intelligence.house.gov/social-media-content/default.aspx
+https://blog.twitter.com/en_us/topics/company/2019/information-ops-on-twitter
+https://blog.twitter.com/en_us/topics/company/2018/enabling-further-research-of-information-operations-on-twitter
+https://blog.twitter.com/en_us/topics/company/2018/enabling-further-research-of-information-operations-on-twitter
+https://about.twitter.com/en/our-priorities/civic-integrity#data
+https://transparency.twitter.com/en/reports/information-operations.html
+
+https://github.com/govertb/GPUGraphLayout
+https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0098679
+https://en.wikipedia.org/wiki/Barnes%E2%80%93Hut_simulation
+https://medium.com/rapids-ai/large-graph-visualization-with-rapids-cugraph-590d07edce33
+https://igraph.org/

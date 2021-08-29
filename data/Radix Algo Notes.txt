@@ -1,0 +1,35 @@
+L = leaf nodes
+I = internal nodes
+k = morton keys of all our points
+b(i, j) = is the length of the longest common prefix between keys i and j
+y = split position for a internal node in [i, j - 1]
+
+- binary radix tree with n leaf nodes has n-1 internal nodes
+- b(i', j') >= b(i, j) for any i', j' in [i, j] since they are same dist or closer
+- internal nodes partition keys according to their first differing bit following 
+  b(i, j). This bit will be 0 for some i and then changes to 1 as you get to j. That
+  change is the split position.
+- b(y, y+1) = b(i, j)
+
+for all internal nodes i in [0, n - 2]
+    d chosen s.t. k(i) and k(i + d) belong to I(i)
+        - k(i - d) is in the siblings node I(i - d)
+
+    bmin = b(i, i - d) s.t. b(i, j) > bmin for all k(j) in I(i)
+
+    ^ we choose d as max(b(i, i-1), b(i, i + 1)) 
+
+    Find largest l s.t. b(i, i + ld) > bmin growing expontentially starting at 2
+    j = other end found using binary search with l (j = i + l*d)
+
+    bnode = b(i, j)
+
+    y = binary search for largest s in [0, l-1] s.t. b(i, i + sd) > bnode 
+
+    if d = 1, y = i + sd 
+    if d = -1, decrement y to account for inverted indexing
+
+    I(i) covers [min(i, j), y] and [y + 1, max(i, j)]
+    
+    if min(i, j) = y then left is a leaf
+    if max(i, j) = y+1, then right is a leaf 
